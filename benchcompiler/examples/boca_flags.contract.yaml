@@ -1,0 +1,57 @@
+# The boca family's INSTANCE CONTRACT (docs/PLAN_2026-09-06_recipes_not_records.md, phase 0).
+#
+# Written by hand until phase 6, when the formalizer derives it from boca_flags.yaml. It is the
+# only per-family knowledge the replay engine (agentcore/recipes.py) has: which scripts an
+# instance must ship, how each is called, and the numbers from the spec. The engine's
+# procedure is the same for every family; the differences between families are this data.
+#
+# Every verb is a file `<verb>.sh` in the instance directory. Two argument names are reserved
+# and bound by the harness: `dir` (the variant's directory under /work/variants/) and `input`
+# (a path the inputs verb produced). Every other argument comes from a variant's setup step
+# or from the solver's probe value.
+
+verbs:
+  build:      {args: [dir, flags]}        # builds the program into <dir> with the given CFLAGS
+  run:        {args: [dir, input]}        # runs <dir>'s program on <input>; stdout is the observable
+  break:      {args: [dir]}               # corrupts <dir>'s built program's computation
+  gen_inputs: {args: [dir]}               # writes inputs of rising cost into <dir> (deterministically)
+
+variants:
+  default:
+    setup: [{verb: build, args: {flags: "-O0"}}]
+  optimized:
+    setup: [{verb: build, args: {flags: "-O3"}}]
+
+observable:
+  verb: run
+  compare: exact                          # the spec's floating-point rule would be `numeric:1e-6`
+
+oracle:
+  kind: reference-equivalence             # run(default, input) == run(optimized, input), every input
+
+negative_control:
+  verb: break
+  variant: default
+  expect: observable_changes              # after break, run(default) must differ from the clean run
+
+solver_input:
+  verb: build
+  arg: flags
+  variant: default
+  probe_values: ["-O0", "-O3"]
+
+measure:
+  inputs: gen_inputs
+  repetitions: 5
+  floor_ms: 1000
+  ceiling_ms: 10000
+  min_ratio: 1.05
+  ratio_of: [default, optimized]
+
+predicates:
+  - run: "git -C /work/repo rev-parse --verify {commit_hash}^{{commit}}"
+    require: "exit zero"
+  - run: "test -f /work/repo/{main_source_file}"
+    require: "exit zero"
+
+instance_fields: [repo_url, commit_hash, main_source_file]

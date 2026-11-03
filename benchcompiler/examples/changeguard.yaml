@@ -1,0 +1,82 @@
+# Real paper: ChangeGuard (FSE 2025, PACMSE
+# Article FSE043; arXiv:2410.16092). Reverse-engineered from the actual PDF
+# methodology section (Section 4.1.2 "Datasets of Code Changes to Analyze").
+
+task: |
+  Given a code change to a single Python function (old version vs. new
+  version), decide whether the change is semantics-preserving (behavior
+  unchanged, e.g. a refactoring) or semantics-changing.
+
+instance: |
+  input: the old and new source of one function, from a single commit
+  expected output: a label in {semantics-preserving, semantics-changing}
+
+data: |
+  Ten named open-source Python projects (Airflow, Black, FastAPI, Flask,
+  HTTPie, Pandas, Poetry, Scikit-Learn, Scrapy, TheAlgorithms) -- the fixed
+  list, not a criterion to rerun. Candidate = a single commit, dated before
+  2023-11-01, that: is not a merge commit; modifies (not adds/removes)
+  exactly one function; touches only a non-test Python file; and whose
+  old/new function parse into different ASTs even after stripping comments,
+  decorators, and type annotations.
+
+admissibility: |
+  not applicable: the sources are the ten named projects listed in `data` above -- a fixed
+  enumerated list the paper froze, explicitly not a criterion to rerun, so there is no
+  population for a floor to bound.
+
+correctness: |
+  human-annotation, honestly under-specified in the source paper: a single
+  researcher manually inspects each candidate change and labels it
+  semantics-preserving, semantics-changing, or unclear (definitions used
+  only implicitly, via the labels' plain meaning -- "semantics-preserving"
+  = the change does not alter observable behavior). Candidates are
+  pre-sorted by commit-message keywords (refactor/simplify/cleanup/optimize
+  suggest semantics-preserving; a balanced random sample without those
+  keywords stands in for likely semantics-changing) before manual labeling,
+  since commit messages alone are not considered reliable. The paper
+  reports NO formal labeling rubric, NO annotator-hours estimate, and NO
+  second annotator or inter-rater agreement statistic for this ground
+  truth -- this is a genuine limitation of the original construction, not
+  an omission in this spec.
+
+interface: |
+  Public GitHub repository (sola-st/ChangeGuard) with code and the released
+  dataset; no separate submission harness described for third-party scoring
+  beyond running the released tool/data directly.
+
+scale: |
+  299 manually annotated code changes total (93 semantics-preserving, 131
+  semantics-changing, 75 unclear); plus 165 additional changes from a
+  rule-based refactoring tool (RIdiom) and further changes from two
+  LLM-based transformation tools, used as secondary evaluation sets.
+  human_budget: not reported by the source paper (single researcher,
+  unspecified hours -- see correctness field).
+
+criteria: |
+  - non-merge commit modifying exactly one function
+  - non-test Python file
+  - old/new function differ at the AST level after normalization
+  - commits dated before 2023-11-01
+
+quality: |
+  - single-annotator labeling; no second rater, no inter-rater agreement
+    statistic reported for the 299-change ground truth
+  - "unclear" is a valid label, used to exclude ambiguous cases from
+    precision/recall reporting rather than forcing a binary call
+
+examples: |
+  Real instances pulled from the paper's own public ground-truth release
+  (github.com/sola-st/ChangeGuard/evaluation/accuracy), not invented:
+  - semantics-preserving: apache/airflow commit 8ea094f, "Remove leftover
+    mesos reference in generic hooks" (#35232) -- deletes a dead dict entry
+    never reachable in the live code path, so observable behavior for all
+    real inputs is unchanged.
+  - semantics-changing: apache/airflow commit a1a23528, "Improve
+    intelligibility of end_of_log determination" (#34788) -- a 5-line change
+    to the log-streaming _read() method's termination-detection logic,
+    altering when the method reports end-of-log.
+  - known-invalid: a commit modifying more than one function, or a merge commit
+
+constraints: |
+  - Python only; single-function-scoped changes only

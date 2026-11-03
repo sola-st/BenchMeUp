@@ -1,0 +1,181 @@
+{
+ "verbs": {
+  "build": {
+   "args": [
+    "dir",
+    "flags"
+   ]
+  },
+  "run": {
+   "args": [
+    "dir",
+    "input"
+   ]
+  },
+  "gen_inputs": {
+   "args": [
+    "dir"
+   ]
+  },
+  "break": {
+   "args": [
+    "dir"
+   ]
+  }
+ },
+ "variants": {
+  "default": {
+   "setup": [
+    {
+     "verb": "build",
+     "args": {
+      "flags": "-O0"
+     }
+    }
+   ]
+  },
+  "optimized": {
+   "setup": [
+    {
+     "verb": "build",
+     "args": {
+      "flags": "-O3"
+     }
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "run",
+  "compare": "exact",
+  "reader": null,
+  "select": null
+ },
+ "oracle": {
+  "kind": "reference-equivalence"
+ },
+ "negative_control": {
+  "verb": "break",
+  "variant": "default",
+  "expect": "observable_changes",
+  "then": null
+ },
+ "solver_input": {
+  "verb": "build",
+  "arg": "flags",
+  "variant": "default",
+  "probe_values": [
+   "-O0",
+   "-O3"
+  ]
+ },
+ "measure": {
+  "inputs": "gen_inputs",
+  "repetitions": 5,
+  "floor_ms": 1000.0,
+  "ceiling_ms": 10000.0,
+  "min_ratio": 1.05,
+  "ratio_of": [
+   "default",
+   "optimized"
+  ]
+ },
+ "predicates": [
+  {
+   "run": "git -C /work/repo rev-parse --verify {commit_hash}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /work/repo/{main_source_file}",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "build": "Compile the program into <dir> with CFLAGS=<flags>; print nothing that matters.",
+  "run": "Run <dir>'s program on <input>; stdout is exactly the program's output.",
+  "gen_inputs": "Write several deterministic inputs of rising cost into <dir>; each input file records the default build's median runtime on it.",
+  "break": "Corrupt <dir>'s built program's computation so that run's output changes (e.g., replace binary with a no-op or corrupt a constant)."
+ },
+ "_stages": [
+  {
+   "name": "environment",
+   "files": [
+    "Dockerfile",
+    "setup.sh",
+    "instance.json"
+   ],
+   "goal": "Install the compiler (gcc/clang) and all libraries the project's build needs in the Dockerfile; clone the repository at the exact commit in setup.sh (a depth-1 fetch of that commit is enough). The checker builds the image and runs setup.sh in a fresh container, so a package that exists only in your scratch container is a failure here. Ensure the commit resolves and the main source file exists.",
+   "done_when": "the image builds, setup.sh exits 0, the commit resolves in /work/repo and the main source file exists",
+   "verbs": [],
+   "rows": [
+    "replays",
+    "identity"
+   ]
+  },
+  {
+   "name": "build",
+   "files": [
+    "build.sh"
+   ],
+   "goal": "build.sh must honour the flags it is given: the checker builds once with -O0 and once with -O3 into two directories and later builds with a solver's flags. A Makefile that hardcodes -O2 must be overridden on the make command line (e.g., make CFLAGS='$flags' or by exporting CFLAGS before make). The script must accept two positional arguments: the output directory and the flag string.",
+   "done_when": "both variants compile in the fresh container (exit 0, binaries produced)",
+   "verbs": [
+    "build"
+   ],
+   "rows": [
+    "variants_build"
+   ]
+  },
+  {
+   "name": "observable",
+   "files": [
+    "run.sh",
+    "gen_inputs.sh",
+    "break.sh"
+   ],
+   "goal": "Pick the command where this program does its own computation on data it reads (compress, hash, parse, transform), not startup, not I/O, not a version banner. run.sh prints only the program's output; gen_inputs.sh writes a few deterministic inputs of rising size, small for now; break.sh corrupts the computation so run.sh's output changes. Ensure the output is identical across runs, differs between inputs, matches between -O0 and -O3, and changes after break.sh.",
+   "done_when": "the output is identical across runs, differs between inputs, matches between -O0 and -O3, and changes after break.sh",
+   "verbs": [
+    "run",
+    "gen_inputs",
+    "break"
+   ],
+   "rows": [
+    "inputs",
+    "stable",
+    "input_sensitive",
+    "oracle",
+    "can_fail"
+   ]
+  },
+  {
+   "name": "workload",
+   "files": [],
+   "goal": "Grow the largest input until the -O0 build takes 1 to 10 seconds on it and runs at least 1.05x slower than -O3. The report shows the runtime of every input; if the curve is flat the program is not doing the work and you need a different command, not a bigger file. If the program cannot be pushed into the band, record the achieved runtime and reason (exception field in instance.json with value other than 'none').",
+   "done_when": "the costliest input is in the band and the ratio clears 1.05x, or an explicit exception is recorded",
+   "verbs": [],
+   "rows": [
+    "solver_input",
+    "in_band",
+    "separates"
+   ]
+  }
+ ],
+ "_instance_fields": [
+  "repo_url",
+  "commit_hash",
+  "main_source_file"
+ ],
+ "_numbers_quoted": {
+  "floor_ms": "must bring the default build's median runtime to at least 1 second",
+  "ceiling_ms": "and to at most 10 seconds",
+  "min_ratio": "at least 1.05 times the -O3 build's median",
+  "repetitions": "median over at least 5 runs"
+ },
+ "_stage_prompts": [
+  "STAGE 1 of 4: environment\n\nWhere you are\n=============\nYou are building an instance of a compiler-autotuning benchmark as a set of scripts that rebuild everything from nothing. This is the first of four stages; nothing exists yet. The instance will consist of a C program at a specific commit, reference inputs, and reference compilations. The harness will later build a Docker image from your Dockerfile, run setup.sh to clone the repository and install dependencies, then execute later stages to compile, generate inputs, and measure runtimes. Your work now establishes the reproducible environment that every subsequent stage depends on.\n\nGoal of this stage\n==================\nIn this stage you must install the compiler (gcc or clang) and all libraries required to build the chosen C program, and clone the repository at the exact commit specified in instance.json. The setup.sh script must perform the clone with a depth-1 fetch of that commit only. The main source file must exist after setup. This matters because the benchmark's oracle compares outputs and measures runtimes across compilations; a missing library or wrong commit would break every later check and make the instance unusable.\n\nWhat to write into /bench\n=========================\n  Dockerfile     FROM a base image; install the toolchain and every dependency the build\n                 and the checks need. No clone, no build, no source in the image.\n  setup.sh       runs once inside that container from /bench, with the network: clone the\n                 repository at the exact commit into /work/repo and leave /work ready. No build.\n  instance.json  a JSON object with commit_hash, main_source_file, repo_url.\n\nHow it is checked\n=================\nbench_check(sandbox=<name>) copies /bench out of your sandbox, builds a FRESH container from\nyour Dockerfile, runs setup.sh, and runs your scripts there. Nothing in your sandbox is used.\nThis stage's checks, in order (the report stops at the first failure):\n  - container builds, setup runs [replays]\n  - commit and files exist [identity]\nThe identity commands, run with your instance.json values:\n  git -C /work/repo rev-parse --verify {commit_hash}^{{commit}}   -> require: exit zero\n  test -f /work/repo/{main_source_file}   -> require: exit zero\n\nTraps\n=====\n  - Installing the compiler via a package manager command that requires interactive confirmation or a non\u2011default repository \u2013 use non\u2011interactive flags (e.g., DEBIAN_FRONTEND=noninteractive) and pin a specific version to avoid environment drift.\n  - Cloning the full repository history instead of a depth\u20111 fetch of the target commit \u2013 this wastes time and disk; use `git clone --depth 1 --branch <commit>` or fetch the commit directly with `git fetch origin <commit> && git checkout <commit>`.\n  - Forgetting to install build\u2011system tools (make, cmake, autoconf) or language\u2011specific libraries that the project\u2019s build file expects \u2013 read the project\u2019s build instructions and install every dependency listed, not just the compiler.\n  - Assuming the main source file path from the proposal is correct without verifying it exists after the clone \u2013 the commit may have moved or the path may be relative; check with `test -f` and fail the script if missing.\n  - Using a compiler that ignores exported CFLAGS (e.g., a makefile that hardcodes -O2) \u2013 ensure the build recipe honours CFLAGS by testing with a trivial override; if it does not, the project is inadmissible and you must reject it now.\n\nDone when\n=========\nbench_check reports every check above as ok. Then call bench_deliver(sandbox=<name>): the stage closes and you get the next stage's instruction. Do not write the next stage's files before that.\n\nExample of a passing report for this stage\n==========================================\n   1 container builds, setup runs [replays]             ok\n   2 commit and files exist [identity]                  ok",
+  "STAGE 2 of 4: build\n\nWhere you are\n=============\nYou are building an instance of a compiler-autotuning benchmark: a C program that, when compiled with different optimization flags, produces identical output but different runtimes. Earlier stages cloned the repository at the specified commit and verified that the source files exist. The setup script has run, ensuring the build environment is ready. Now you must write build.sh, which will be called by the harness to compile the program with any given flag string into a specified output directory. This script is the only way the harness produces binaries for measurement.\n\nGoal of this stage\n==================\nWrite build.sh that accepts two positional arguments: an output directory and a flag string (e.g., '-O0' or '-O3'). It must compile the program into that directory using the given flags, honouring the CFLAGS environment variable or overriding any hardcoded optimization flags in the build system. This is critical because the harness will use build.sh to build the default (-O0) and optimized (-O3) reference compilations, and later the solver's candidate configurations. A correct build.sh ensures that the only difference between binaries is the optimization flags, enabling fair runtime comparison.\n\nWhat to write into /bench\n=========================\n  build.sh <dir> <flags>\n      Compile the program into <dir> with CFLAGS=<flags>; print nothing that matters.\nThe harness materializes each version into its own randomly named directory <dir>, in this order:\n  default: build.sh <dir> -O0\n  optimized: build.sh <dir> -O3\n\nHow it is checked\n=================\nbench_check(sandbox=<name>) copies /bench out of your sandbox, builds a FRESH container from\nyour Dockerfile, runs setup.sh, and runs your scripts there. Nothing in your sandbox is used.\nThis stage's checks, in order (the report stops at the first failure):\n  - both versions build [variants_build]\n\nTraps\n=====\n  - Assuming the project's Makefile respects CFLAGS when it hardcodes -O2 or -O3; instead, override by exporting CFLAGS before make or by passing CFLAGS='$flags' on the make command line.\n  - Ignoring the output directory argument and building in the current directory; build.sh must place the compiled binary (and any intermediate files) inside the given directory, not pollute the source tree.\n  - Using a fixed flag string like '-O2' instead of the second argument; the harness passes different flags each time, so the script must use the exact flag string provided.\n  - Forgetting to clean previous builds before recompiling; if the output directory already contains a binary, make may skip recompilation, leading to stale binaries with wrong flags.\n  - Handling only Makefile-based builds but the project uses CMake or configure; build.sh must detect and invoke the correct build system (e.g., cmake -DCMAKE_C_FLAGS='$flags' or ./configure CFLAGS='$flags').\n  - Building with additional flags beyond the given ones (e.g., adding -march=native); the flag string must be used exactly as provided, with no extra flags that could affect runtime or output.\n\nDone when\n=========\nbench_check reports every check above as ok. Then call bench_deliver(sandbox=<name>): the stage closes and you get the next stage's instruction. Do not write the next stage's files before that.\n\nExample of a passing report for this stage\n==========================================\n   3 both versions build [variants_build]               ok",
+  "STAGE 3 of 4: observable\n\nWhere you are\n=============\nYou are building an instance of this compiler-autotuning benchmark as a set of scripts that rebuild everything from nothing. Earlier stages established that the container builds, the setup script runs, the commit and source files exist, and both the default (-O0) and optimized (-O3) versions build successfully. No scripts beyond build.sh and setup.sh exist yet. Now you must write the scripts that make the program's computation observable: run.sh, gen_inputs.sh, and break.sh.\n\nGoal of this stage\n==================\nIn this stage you must write run.sh so that it prints only the program's output (no extra text), gen_inputs.sh so that it generates several deterministic inputs of rising cost that exercise the program's own computation, and break.sh so that it corrupts the built binary or a constant to change the output. This matters because the benchmark's oracle compares output digests, and its measurement requires a runtime band where the default build is at least 1.05\u00d7 slower than -O3 on the costliest input.\n\nWhat to write into /bench\n=========================\n  run.sh <dir> <input>\n      Run <dir>'s program on <input>; stdout is exactly the program's output.\n  gen_inputs.sh <dir>\n      Write several deterministic inputs of rising cost into <dir>; each input file records the default build's median runtime on it.\n  break.sh <dir>\n      Corrupt <dir>'s built program's computation so that run's output changes (e.g., replace binary with a no-op or corrupt a constant).\nrun.sh prints the program's result and nothing else: no timings, no logs, no progress lines (send those to stderr).\ngen_inputs.sh <dir> writes SMALL inputs for now (a few sizes; the largest can take under a second); growing them is the last stage.\nbreak.sh <dir> corrupts the default version's computation so that the result changes; a break the result cannot reveal is refused.\n\nHow it is checked\n=================\nbench_check(sandbox=<name>) copies /bench out of your sandbox, builds a FRESH container from\nyour Dockerfile, runs setup.sh, and runs your scripts there. Nothing in your sandbox is used.\nThis stage's checks, in order (the report stops at the first failure):\n  - inputs are generated [inputs]\n  - same output every run [stable]\n  - output depends on the input [input_sensitive]\n  - the versions give the same output [oracle]\n  - the break is detected [can_fail]\nThe versions must agree: default and optimized give the same output on every input.\n\nTraps\n=====\n  - Writing run.sh that prints a version banner, timing, or any extra text will cause output digest mismatches; print only what the program writes to stdout.\n  - Generating inputs with random data without a fixed seed makes output non-reproducible across runs; use a deterministic generator or fixed content.\n  - Making break.sh corrupt a file the program does not read (e.g., a comment in source) will not change the output; corrupt the binary itself or a constant the output depends on.\n  - Assuming the binary is at a fixed path like ./a.out instead of using the directory argument <dir> will break when the harness runs different versions; always invoke the binary from <dir>.\n  - Generating inputs that do not scale the program's own domain (e.g., just appending zeros) may not increase runtime meaningfully; scale parameters like corpus size, wordlist length, or image dimensions.\n  - For programs with floating-point output, ensure the output is deterministic across runs (same rounding, no time-dependent values) so that the numeric tolerance comparison works.\n\nDone when\n=========\nbench_check reports every check above as ok. Then call bench_deliver(sandbox=<name>): the stage closes and you get the next stage's instruction. Do not write the next stage's files before that.\n\nExample of a passing report for this stage\n==========================================\n   4 inputs are generated [inputs]                      ok\n   5 same output every run [stable]                     ok\n   6 output depends on the input [input_sensitive]      ok\n   7 the versions give the same output [oracle]         ok\n   8 the break is detected [can_fail]                   ok",
+  "STAGE 4 of 4: workload\n\nWhere you are\n=============\nYou are building an instance of a compiler autotuning benchmark: a C program at a specific commit, with scripts that rebuild from nothing. Earlier stages have established that the container builds, setup runs, the commit and files exist, both default (-O0) and optimized (-O3) builds compile and produce identical output on the small reference input, inputs are generated by gen_inputs.sh, output is deterministic and depends on input, and the break detection works. Now you must ensure the largest generated input makes the default build run between 1 and 10 seconds and at least 1.05x slower than the optimized build.\n\nGoal of this stage\n==================\nIn this stage, you must adjust the input generation script (gen_inputs.sh) to produce several reference inputs of increasing cost, culminating in one that pushes the default build's median runtime into the 1\u201310 second band and shows at least 5% slowdown relative to -O3. This ensures the workload is dominated by the program's own computation, making compiler flag differences observable. If the program cannot be pushed into the band, you must leave gen_inputs.sh as is (the harness will detect the exception from the measured runtimes).\n\nWhat to write into /bench\n=========================\n  (no new file; this stage edits what earlier stages wrote)\nThe harness materializes each version into its own randomly named directory <dir>, in this order:\n  default: build.sh <dir> -O0\n  optimized: build.sh <dir> -O3\nThe solver submits <flags> to build.sh on the default version. The harness applies '-O0' and '-O3' and requires a different result; if a probe value names a file under /bench, write it.\nGrow gen_inputs.sh's largest input until default's median over 5 runs is between 1000 and 10000 ms, and default / optimized is at least 1.05x.\n\nHow it is checked\n=================\nbench_check(sandbox=<name>) copies /bench out of your sandbox, builds a FRESH container from\nyour Dockerfile, runs setup.sh, and runs your scripts there. Nothing in your sandbox is used.\nThis stage's checks, in order (the report stops at the first failure):\n  - a submission changes the result [solver_input]\n  - runtime inside the band [in_band]\n  - default is slower than optimized by the margin [separates]\nThe report shows the runtime of every input; a flat curve means the program is not doing the\nwork, and you need a different command, not a bigger file.\n\nTraps\n=====\n  - Do not assume byte size predicts runtime; a small config file can be the longest-running input if it triggers heavy computation, so measure runtime directly rather than scaling by file size.\n  - Do not stop after one input type; if the first scaling attempt yields a flat runtime curve (e.g., I/O-bound), try a different kind of workload (more computation per byte, less I/O) before concluding the program is flag-insensitive.\n  - Do not generate an input that takes the default build beyond 10 seconds; the harness will re-run it many times, and an overly long input wastes compute and may become I/O-bound, hiding the flag effect.\n  - Do not forget that the program must be deterministic on the generated inputs; if your input introduces randomness (e.g., unseeded random), fix the seed in gen_inputs.sh or run.sh to ensure reproducible output digests.\n  - Do not modify run.sh or build.sh; only gen_inputs.sh is the script that controls input generation. The harness measures runtimes by running run.sh with the generated inputs, so ensure gen_inputs.sh produces inputs that run.sh can consume.\n\nDone when\n=========\nbench_check reports every check above as ok. Then call bench_deliver(sandbox=<name>): the candidate is delivered.\n\nExample of a passing report for this stage\n==========================================\n   9 a submission changes the result [solver_input]     ok\n  10 runtime inside the band [in_band]                  ok\n  11 default is slower than optimized by the margin [separates]ok"
+ ]
+}

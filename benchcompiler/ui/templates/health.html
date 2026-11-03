@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Health{% endblock %}
+{% block content %}
+<h1>Health</h1>
+<p class="sub">Warnings about live runs, rechecked every 30 seconds. They only report; stopping or changing a run is your call.</p>
+<div class="live" id="health">
+{% if ws %}
+<table class="dense"><thead><tr><th>level</th><th>what</th><th>where</th><th>happened</th><th>why it matters</th><th>what to do</th></tr></thead><tbody>
+{% for w in ws %}<tr>
+  <td>{{ badge({'bad': 'failed', 'warn': 'warn', 'info': 'info'}[w.level]) }}</td>
+  <td class="nowrap"><b>{{ w.kind }}</b></td>
+  <td><a href="{{ w.url }}">{{ w.where }}</a></td>
+  <td class="wrap">{{ w.what }}</td><td class="wrap muted small">{{ w.why }}</td><td class="wrap small">{{ w.todo }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% else %}<p class="empty">Nothing to report: no live run shows a stall, provider error, repeated tool failure or poor pace, and the disk has room.</p>{% endif %}
+</div>
+<p class="muted small">Checks: no new step for {{ 10 }} min · provider or crash lines in a live agent's log · 75% of recent
+  tool calls failing (once per run when half its agents show it) · a construction run past half its budget heading for
+  under half its target · under 15% disk free · an agent at 90% of its cost cap (info).</p>
+{% endblock %}

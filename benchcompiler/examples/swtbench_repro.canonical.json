@@ -1,0 +1,441 @@
+{
+  "raw_spec_path": "benchcompiler/examples/swtbench_repro.yaml",
+  "raw_sha256": "afa18422506c78ea01ddf6b20e7238ba3838e96b7c3a77daa05a14c249ccf4c2",
+  "model": "claude-code/claude-opus-5",
+  "outcome": "ACCEPT",
+  "canonical_spec": {
+    "spec_id": "a63e0317a56c",
+    "task": "Given a real GitHub issue text and a snapshot of the project's repository at the pre-fix commit, an automated technique must generate a test that reproduces the reported bug. The generated test is judged by whether it fails on the pre-fix snapshot and passes on the post-fix snapshot (the real maintainer fix applied).",
+    "instance_input": "The issue text (problem_statement) plus a repository snapshot checked out at the pre-fix commit (base_commit), installed and with its test suite runnable.",
+    "instance_output": "A test (a new test file or a test function added/modified in the project's test suite), written into the checked-out tree, that reproduces the reported bug.",
+    "data_source": "Real, public Python projects on GitHub that have an issue tracker and pull requests, mined via the GitHub REST/search APIs and full clones; the 12 repositories already used by SWE-bench/SWT-Bench are excluded.",
+    "candidate_definition": "ONE instance = ONE merged pull request that closes a reported issue and, in the same PR, adds or modifies at least one test that fails at the commit before the PR merged and passes at the commit that merged it. The instance is identified by {repository URL, merge_commit} where merge_commit is the commit that merged the PR (produced by any of GitHub's three merge styles: merge commit, squash, or rebase) and base_commit is merge_commit's FIRST parent. A single-parent merging commit (squash/rebase) is a normal, valid candidate; a second parent is never required.",
+    "oracle_strategy": "fail-to-pass-tests",
+    "oracle_detail": "Two built variants are contrasted by executing the PR's own named test. `prefix` = base_commit with test_patch.patch (the PR's test changes) applied and installed; `postfix` = merge_commit installed. `sh run_tests.sh .` runs the named test in the given directory and prints the test runner's JUnit XML report on stdout unmodified, exiting 0 regardless of test outcome. The harness reads the named test's outcome from the JUnit report: the instance is correct only if the named test reports exactly 1 failure on `prefix` and 0 failures on `postfix`. The empty patch (empty.patch) applied on `prefix` must NOT produce a failing-then-passing transition (it is the negative answer). revert_fix.sh <dir> reverts the PR's non-test changes in the `postfix` tree, after which the named test must fail again. Exit status of any additional builder-declared check script is also read. No human labeling is involved.",
+    "interface": "Each instance is packaged in SWE-bench's instance shape: repo, base_commit, patch, test_patch, problem_statement, FAIL_TO_PASS. Physically, one instance is one directory containing instance.json (repo_url, merge_commit, base_commit, test_name, problem_statement, builder_notes), Dockerfile, setup.sh, checkout.sh, apply_patch.sh, install.sh, run_tests.sh, revert_fix.sh, test_patch.patch, fix.patch, empty.patch, plus any further declared check scripts.",
+    "scale": {
+      "instance_count": "15-20 instances in the first pass",
+      "compute_budget": "Per instance: one Docker image build with the project's Python dependencies, two full installs (prefix and postfix), and at least 3 test-runner invocations (prefix, postfix, reverted-postfix); mined from a source pool over public GitHub APIs and full clones.",
+      "human_budget": "None required \u2014 the oracle is fully executable. The builder's own verification run and builder_notes are engineering effort, not per-instance human labeling."
+    },
+    "criteria": [
+      "real merged pull request that closes a reported issue, merged in any of the three ways GitHub offers (merge commit, squash, rebase); the merging commit's first parent is the base commit in all three, and a single-parent merging commit is normal, not a defect",
+      "the PR's own added/modified test fails on the pre-fix commit and passes on the PR's merge commit, confirmed by an actual test run",
+      "both the pre-fix and post-fix snapshots build/install and run their test suite",
+      "the builder verifies itself, by running it on its own machine, that the PR's test fails on the prefix version and passes on the postfix version, and that the PR changes non-test source; it records the test's id and its judgment in builder_notes",
+      "done means: the harness ran every script on a blank machine without a crash, and the builder has verified the points above itself and written what it verified, with the numbers and the reason for anything it accepted against the harness's observations, into instance.json under builder_notes. The harness reports what it observed; the builder judges."
+    ],
+    "quality_gates": [
+      "reproducibility: re-verify a sample of instances across 3 clean-environment reruns, requiring identical outcomes",
+      "corruption sensitivity: a deliberately corrupted instance/label (e.g. a test_patch whose test passes on prefix) must be rejected by the pipeline's own gates; the declared negative_control (revert_fix.sh on postfix) must flip the postfix verdict",
+      "deduplication: near-duplicate instances removed (at most one instance per pull request, and diversity caps applied per repository)",
+      "the harness ran every declared script on a blank machine without a crash"
+    ],
+    "examples": [
+      {
+        "valid": true,
+        "description": "A merged PR in a public Python project, squash-merged as one ordinary single-parent commit, that closes issue #NNNN and adds test_foo_regression to tests/test_foo.py. base_commit is the squash commit's only parent. The test fails on base_commit+test_patch and passes on the squash commit."
+      },
+      {
+        "valid": true,
+        "description": "A merged PR landed as a two-parent merge commit; base_commit is the merge commit's FIRST parent (the base branch tip), not the second."
+      },
+      {
+        "valid": false,
+        "description": "A merged PR that only edits tests with no non-test source change \u2014 the fix.patch would be empty, so the fail->pass transition would not be attributable to a source fix."
+      },
+      {
+        "valid": false,
+        "description": "A PR in django/django \u2014 on the excluded SWE-bench/SWT-Bench roster."
+      }
+    ],
+    "constraints": [
+      "Python projects only",
+      "project must NOT be one of the 12 repos SWE-bench/SWT-Bench already use: astropy/astropy, django/django, matplotlib/matplotlib, mwaskom/seaborn, pallets/flask, psf/requests, pydata/xarray, pylint-dev/pylint, pytest-dev/pytest, scikit-learn/scikit-learn, sphinx-doc/sphinx, sympy/sympy"
+    ],
+    "assumptions": [
+      {
+        "field": "scale.instance_count",
+        "resolved_to": "15-20 instances (first pass), interpreted as a closed range; '~' resolved to the stated bounds",
+        "reason": "The spec states '~15-20 instances'; the narrow reading is the stated interval itself."
+      },
+      {
+        "field": "scale.human_budget",
+        "resolved_to": "none required",
+        "reason": "Oracle is fail-to-pass-tests, fully executable; no human labeling step is named anywhere in the spec."
+      },
+      {
+        "field": "quality",
+        "resolved_to": "added default quality_gates: reproducibility across 3 clean reruns, corruption sensitivity, deduplication",
+        "reason": "The spec declared no `quality` field; defaults are added per the standing rule and recorded here."
+      },
+      {
+        "field": "admissibility.last_commit",
+        "resolved_to": "pushed_at within 12 months of the population snapshot date (2026-09-09)",
+        "reason": "The spec's 'within 12 months' is measured against the snapshot date; the date is fixed so two people fetch the same verdict."
+      },
+      {
+        "field": "negative_control.break_cmd",
+        "resolved_to": "the corruption command field holds `sh revert_fix.sh <dir>` run in the postfix tree",
+        "reason": "The spec names revert_fix.sh <dir> as the mechanism that reverts the fix in the postfix tree; corruption_cmd is bound to it."
+      },
+      {
+        "field": "sampling.caps",
+        "resolved_to": "at most 1 lead per pull request and at most 3 leads per repository",
+        "reason": "The spec asks for 15-20 instances with a deduplication expectation; a per-repo cap of 3 keeps a 15-20 instance pool spread over at least ~6 distinct projects. Recorded because the spec states no number."
+      },
+      {
+        "field": "sampling.normalize",
+        "resolved_to": "orphans dropped",
+        "reason": "sampling.normalize: nothing given the normal form 'none' (the generic treatment: case, a trailing slash and .git do not change the identity); dropped entries for non-key fields ['base_commit']"
+      }
+    ],
+    "delegations": [],
+    "admissibility": [
+      {
+        "name": "language",
+        "observe": "GET https://api.github.com/repos/{org}/{project} -> language",
+        "require": "one of [python]"
+      },
+      {
+        "name": "commit_count",
+        "observe": "git rev-list --count HEAD in a full clone",
+        "require": ">= 500"
+      },
+      {
+        "name": "has_issues",
+        "observe": "GET https://api.github.com/repos/{org}/{project} -> has_issues",
+        "require": "is true"
+      },
+      {
+        "name": "merged_prs_closing_issues",
+        "observe": "GET https://api.github.com/search/issues?q=repo:{org}/{project}+is:pr+is:merged+linked:issue -> total_count",
+        "require": ">= 20"
+      },
+      {
+        "name": "stars",
+        "observe": "GET https://api.github.com/repos/{org}/{project} -> stargazers_count",
+        "require": ">= 100"
+      },
+      {
+        "name": "last_commit",
+        "observe": "GET https://api.github.com/repos/{org}/{project} -> pushed_at (YYYY-MM-DD)",
+        "require": "within 12 months"
+      },
+      {
+        "name": "is_fork",
+        "observe": "GET https://api.github.com/repos/{org}/{project} -> fork",
+        "require": "is false"
+      }
+    ],
+    "artifact_variants": [
+      {
+        "name": "prefix",
+        "description": "the repository snapshot at the pre-fix commit (the commit before the PR merged), installed with its test suite runnable, with the PR's own added/modified test applied. The check runs that test and passes only if it FAILS here -- the issue is reproducible",
+        "check_cmd": "sh run_tests.sh .",
+        "expect": "pass",
+        "results": "junit-xml",
+        "expect_failures": 1
+      },
+      {
+        "name": "postfix",
+        "description": "the repository snapshot at the PR's merge commit (the real fix applied), installed with its test suite runnable. The check runs the same test and passes only if it PASSES here",
+        "check_cmd": "sh run_tests.sh .",
+        "expect": "pass",
+        "results": "junit-xml",
+        "expect_failures": 0
+      }
+    ],
+    "solver_input": {
+      "kind": "workdir",
+      "path": "{clone_path}",
+      "describes": "the solver writes a test into the checked-out tree that reproduces the reported issue"
+    },
+    "negative_control": {
+      "break_cmd": "corruption_cmd",
+      "check": "postfix",
+      "describes": "revert the fix in the working tree so the reproducing test must stop passing"
+    },
+    "entry_contract": [
+      {
+        "field": "repo_url",
+        "require": "is a clone url",
+        "teach": "record the https clone url of the project, e.g. https://github.com/org/project.git \u2014 this is what the harness clones"
+      },
+      {
+        "field": "org",
+        "require": "is an atomic name",
+        "teach": "the GitHub owner segment of the repository, e.g. 'psf' \u2014 one name, no slashes"
+      },
+      {
+        "field": "repo",
+        "require": "is an atomic name",
+        "teach": "the GitHub repository name segment, e.g. 'black' \u2014 one name, no slashes"
+      },
+      {
+        "field": "clone_path",
+        "require": "is a plain absolute path",
+        "teach": "record the absolute path where you cloned this repository; every corroboration git step runs with -C on it"
+      },
+      {
+        "field": "merge_commit",
+        "require": "is a git sha",
+        "teach": "the full 40-hex sha of the commit that merged the pull request, from the PR API field merge_commit_sha or from `git log` on the default branch. Squash and rebase merges are single-parent commits and are equally valid here"
+      },
+      {
+        "field": "base_commit",
+        "require": "is a git sha",
+        "teach": "the full 40-hex sha of merge_commit's FIRST parent \u2014 for a squashed or rebased PR that is simply its only parent. Get it with `git -C <clone> rev-parse <merge_commit>^1`"
+      },
+      {
+        "field": "pr_url",
+        "require": "is a full http url",
+        "teach": "the html_url of the merged pull request, e.g. https://github.com/org/project/pull/123"
+      },
+      {
+        "field": "issue_url",
+        "require": "resolves to a tracker item that is not a pull request",
+        "teach": "the html_url of the ISSUE the pull request closes (from the closing keyword or the linked-issue timeline event). A /pull/ url is not an issue and is refused"
+      },
+      {
+        "field": "test_path",
+        "require": "is a relative path to one file",
+        "teach": "one test file the pull request adds or modifies, as a path relative to the repository root, exactly as it appears in the PR's Files-changed listing"
+      },
+      {
+        "field": "language",
+        "require": "one of [Python]",
+        "teach": "GET https://api.github.com/repos/{org}/{repo} -> language; only Python projects are in scope"
+      },
+      {
+        "field": "stars",
+        "require": ">= 100",
+        "teach": "GET https://api.github.com/repos/{org}/{repo} -> stargazers_count"
+      },
+      {
+        "field": "has_issues",
+        "require": "is true",
+        "teach": "GET https://api.github.com/repos/{org}/{repo} -> has_issues"
+      },
+      {
+        "field": "is_fork",
+        "require": "is false",
+        "teach": "GET https://api.github.com/repos/{org}/{repo} -> fork; forks are refused"
+      },
+      {
+        "field": "last_commit",
+        "require": "within 12 months",
+        "teach": "GET https://api.github.com/repos/{org}/{repo} -> pushed_at, recorded as YYYY-MM-DD"
+      },
+      {
+        "field": "merged_prs_closing_issues",
+        "require": ">= 20",
+        "teach": "GET https://api.github.com/search/issues?q=repo:{org}/{repo}+is:pr+is:merged+linked:issue -> total_count"
+      },
+      {
+        "field": "commit_count",
+        "require": ">= 500",
+        "teach": "`git -C <clone> rev-list --count HEAD` in a full (non-shallow) clone"
+      },
+      {
+        "field": "pr_url",
+        "require": "is distinct across leads",
+        "teach": "one lead per pull request; the same PR url on two leads is a duplicate, not a second observation"
+      }
+    ],
+    "exclusions_on": [
+      "repo_url",
+      "org",
+      "repo"
+    ],
+    "corroboration_contract": [
+      {
+        "field": "clone_path",
+        "require": "is non-empty",
+        "teach": "record the absolute path where you cloned this repository"
+      },
+      {
+        "run": "git -C {clone_path} rev-parse --verify {merge_commit}^{commit}",
+        "require": "output is a git sha",
+        "teach": "merge_commit must exist in the clone you recorded; clone the full default branch, not a shallow tip"
+      },
+      {
+        "run": "git -C {clone_path} rev-parse --verify {base_commit}^{commit}",
+        "require": "output is a git sha",
+        "teach": "base_commit must exist in the same clone"
+      },
+      {
+        "run": "git -C {clone_path} rev-parse {merge_commit}^1",
+        "require": "last output line is the commit {base_commit}",
+        "teach": "base_commit must be the FIRST parent of merge_commit. For a squash or rebase merge that is its only parent; do not record the second parent"
+      },
+      {
+        "run": "git -C {clone_path} rev-list --count {merge_commit}",
+        "require": "output matches ^[0-9]{3,}$",
+        "teach": "the project must have at least 500 commits of history reachable from the merging commit; record a full clone"
+      },
+      {
+        "run": "git -C {clone_path} diff --name-only {base_commit} {merge_commit}",
+        "require": "exit zero and some output line",
+        "teach": "the pull request must change files between base_commit and merge_commit; an empty diff is not a candidate"
+      },
+      {
+        "run": "git -C {clone_path} diff --name-only {base_commit} {merge_commit} -- {test_path}",
+        "require": "output lines are exactly [{test_path}]",
+        "teach": "test_path must be a file the pull request actually adds or modifies; copy it from the PR's Files-changed tab"
+      },
+      {
+        "run": "git -C {clone_path} show --quiet --format=%s {merge_commit}",
+        "require": "exit zero and some output line",
+        "teach": "merge_commit must be a real commit object with a subject line"
+      },
+      {
+        "tracker": "issue_url",
+        "policy": {
+          "label_words": [
+            "bug",
+            "defect",
+            "crash",
+            "regression",
+            "error",
+            "traceback",
+            "incorrect"
+          ],
+          "text_pattern": "(?i)(bug|error|traceback|exception|incorrect|unexpected|fails?|regress)",
+          "kind_into": "tracker_kind"
+        }
+      },
+      {
+        "run": "ls {clone_path}/setup.py {clone_path}/setup.cfg {clone_path}/pyproject.toml",
+        "require": "exit zero and some output line",
+        "teach": "the project must be an installable Python project \u2014 at least one of setup.py, setup.cfg or pyproject.toml must exist at the repository root"
+      }
+    ],
+    "corroboration_accept": "In {clone_path}, {merge_commit} exists and its first parent is exactly {base_commit}; the pull request at {pr_url} changes {test_path} between them, {issue_url} resolves to a tracker issue of kind {tracker_kind}, and {org}/{repo} is an installable Python project with sufficient history.",
+    "sampling": {
+      "pool_requires": [
+        "repo_url",
+        "org",
+        "repo",
+        "language",
+        "stars",
+        "has_issues",
+        "is_fork",
+        "last_commit",
+        "merged_prs_closing_issues",
+        "commit_count"
+      ],
+      "spread_by": "repo_url",
+      "pool_exclusion_fields": [
+        "repo_url",
+        "org",
+        "repo"
+      ],
+      "lead_requires": [
+        "repo_url",
+        "org",
+        "repo",
+        "clone_path",
+        "merge_commit",
+        "base_commit",
+        "pr_url",
+        "issue_url",
+        "test_path",
+        "language",
+        "stars",
+        "has_issues",
+        "is_fork",
+        "last_commit",
+        "merged_prs_closing_issues",
+        "commit_count"
+      ],
+      "lead_key": [
+        "repo_url",
+        "merge_commit"
+      ],
+      "normalize": {
+        "repo_url": "git_url",
+        "merge_commit": "full_sha"
+      },
+      "caps": [
+        {
+          "dimension": "per_pull_request",
+          "keys": [
+            "pr_url"
+          ],
+          "limit": 1
+        },
+        {
+          "dimension": "per_repository",
+          "keys": [
+            "repo_url"
+          ],
+          "limit": 3
+        },
+        {
+          "dimension": "per_issue",
+          "keys": [
+            "issue_url"
+          ],
+          "limit": 1
+        }
+      ],
+      "found_enforces": [
+        "the repository is a non-fork Python project with issues enabled, >= 100 stars, >= 500 commits, >= 20 merged PRs linked to issues, and a push within 12 months",
+        "the repository is not on the spec's 12-repo SWE-bench/SWT-Bench exclusion roster",
+        "the lead points at exactly one merged pull request by its html_url, its merge_commit sha and its first-parent base_commit sha",
+        "the lead names the issue the pull request closes by url, and that url is not a pull request url",
+        "the lead names one test file the pull request adds or modifies, as a repo-relative path",
+        "no two leads share a pull request url"
+      ],
+      "delivered_enforces": [
+        "merge_commit and base_commit both resolve to commit objects inside the clone the miner recorded",
+        "base_commit is verified to be merge_commit's FIRST parent, whether merge_commit has one parent (squash/rebase) or two (merge commit)",
+        "the diff between base_commit and merge_commit is non-empty and includes the recorded test_path",
+        "the recorded issue_url is fetched live and judged to be a tracker issue, not a pull request",
+        "the repository root carries at least one of setup.py, setup.cfg, pyproject.toml so both snapshots can be installed"
+      ],
+      "search_hints": "Build the source pool from the GitHub search API restricted to Python: GET https://api.github.com/search/repositories?q=language:Python+stars:>=100+fork:false+pushed:>=2025-09-09, then confirm each candidate repo with GET https://api.github.com/repos/{org}/{repo} (language, stargazers_count, has_issues, fork, pushed_at) and GET https://api.github.com/search/issues?q=repo:{org}/{repo}+is:pr+is:merged+linked:issue (total_count >= 20). Drop any repo on the 12-repo exclusion roster in constraints. For each admitted repo, do a FULL clone (no --depth) and confirm `git -C {clone_path} rev-list --count HEAD` >= 500. Find candidates via GET https://api.github.com/search/issues?q=repo:{org}/{repo}+is:pr+is:merged+linked:issue&sort=updated: for each hit fetch GET /repos/{org}/{repo}/pulls/{number} for merge_commit_sha, GET /repos/{org}/{repo}/issues/{number}/timeline for the closed/cross-referenced issue url, and GET /repos/{org}/{repo}/pulls/{number}/files for a changed path under tests/ or matching test_*.py / *_test.py. Prefer projects whose PR history mixes merge styles; NEVER filter candidates on merge_commit having two parents \u2014 squash and rebase merges land as single-parent commits and are equally in scope. Get base_commit only as `git -C {clone_path} rev-parse {merge_commit}^1`, never as the second parent and never as the PR's base.sha (which can be stale after rebase). Steer toward maintained Python libraries and CLI tools with a pytest-based suite and a pip-installable root; steer away from documentation-only repos, notebook collections, forks, and the 12 excluded projects. Do not extract diffs, run installs or run tests at mining time \u2014 patches, FAIL_TO_PASS and problem_statement text belong to the construction stage.",
+      "strategies": [
+        {
+          "kind": "linked_issue_search",
+          "strategy": "Query GitHub search for is:pr is:merged linked:issue per admitted repository, walk results newest-first, and register the first N whose Files-changed listing includes a test path."
+        },
+        {
+          "kind": "closing_keyword_log",
+          "strategy": "Scan `git -C {clone_path} log --format=%H%x09%s%x09%b` on the default branch for commit messages containing 'fixes #', 'closes #', 'resolves #' together with '(#NNN)', which catches squash merges whose subject carries the PR number, then resolve the PR and issue by API."
+        },
+        {
+          "kind": "issue_first",
+          "strategy": "List closed issues labelled bug/defect/regression per repository, follow each issue's timeline to the merged pull request that closed it, and register the PR's merge_commit."
+        },
+        {
+          "kind": "release_notes_walk",
+          "strategy": "Read the project's CHANGELOG/release notes for bugfix entries citing issue numbers, resolve each cited issue to its closing merged PR, and register that PR."
+        },
+        {
+          "kind": "merge_style_balance",
+          "strategy": "Deliberately sample repositories known to squash-merge (single-parent merging commits) alongside repositories that keep merge commits, so the delivered pool exercises all three merge styles."
+        }
+      ],
+      "mining_quality_gates": [
+        "every delivered lead names one merged pull request, its merge_commit, and a base_commit proven to be that commit's first parent",
+        "every delivered lead's issue_url resolves live to a tracker issue, not a pull request",
+        "every delivered lead names a test file the pull request itself touches",
+        "no lead is delivered from an excluded repository, a fork, or a non-Python project",
+        "at most 1 lead per pull request, 1 per issue, and 3 per repository, so 15-20 instances span at least ~6 distinct projects",
+        "no lead carries a patch, a test id, a problem_statement body, or any measured test outcome \u2014 those are construction-stage products"
+      ]
+    },
+    "report_discovery": {
+      "junit-xml": [
+        "*junit*.xml",
+        "TEST-*.xml",
+        "*test-results/*.xml",
+        "*reports/*.xml",
+        "report.xml",
+        "results.xml"
+      ]
+    }
+  }
+}

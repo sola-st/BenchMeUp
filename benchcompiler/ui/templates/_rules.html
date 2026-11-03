@@ -1,0 +1,34 @@
+<p class="sub">Phase 1's output: the canonical specification the model generated from the specification
+(outcome <code>{{ rules.outcome or 'none' }}</code>), and the brief every search agent of this task receives.</p>
+
+{% set b = rules.brief %}
+<h2>What a search agent is told</h2>
+<div class="kv">
+  <div class="k">candidate identity</div><div class="v">{{ (b.identity_fields or [])|join(', ') or '-' }}</div>
+  <div class="k">a candidate is</div><div class="v">{{ b.candidate_definition or '-' }}</div>
+  <div class="k">where to look</div><div class="v">{{ b.data_source or '-' }}</div>
+  <div class="k">spread</div><div class="v">{{ b.spread or '-' }}</div>
+  <div class="k">target per agent</div><div class="v">{{ b.sample_size or '-' }}</div>
+</div>
+
+{% if b.admissibility %}
+<h3>Admissibility (what each source must satisfy)</h3>
+<table><thead><tr><th>clause</th><th>observe</th><th>require</th></tr></thead><tbody>
+{% for a in b.admissibility %}<tr><td>{{ a.name }}</td><td class="wrap"><code>{{ a.observe }}</code></td><td>{{ a.require }}</td></tr>{% endfor %}
+</tbody></table>
+{% endif %}
+{% if b.criteria %}<h3>Criteria</h3><pre>{{ b.criteria }}</pre>{% endif %}
+{% if b.constraints %}<h3>Constraints</h3><pre>{{ b.constraints }}</pre>{% endif %}
+
+<h2>The canonical specification</h2>
+{% set c = rules.canonical %}
+<div class="kv">
+  {% for k in ['task', 'candidate_definition', 'data_source', 'oracle_strategy', 'oracle_detail', 'interface'] %}
+    {% if c[k] %}<div class="k">{{ k|replace('_', ' ') }}</div><div class="v">{{ c[k] }}</div>{% endif %}
+  {% endfor %}
+</div>
+{% for k in ['criteria', 'artifact_variants', 'solver_input', 'negative_control', 'assumptions', 'delegations', 'scale'] %}
+  {% if c[k] %}<details><summary>{{ k|replace('_', ' ') }}</summary><pre>{{ c[k]|tojson_pretty }}</pre></details>{% endif %}
+{% endfor %}
+<details><summary>The whole canonical specification (JSON)</summary><pre>{{ c|tojson_pretty }}</pre></details>
+<details><summary>The whole search brief (JSON)</summary><pre>{{ b|tojson_pretty }}</pre></details>

@@ -1,0 +1,41 @@
+# The Defects4J-like family's INSTANCE CONTRACT (phase 0 of the recipes plan). Hand-written
+# until phase 6; not exercised by a replay until then. It exists now so that the contract
+# schema is proven on two family shapes, not one.
+
+verbs:
+  checkout:   {args: [dir, revision]}     # copies /work/repo into <dir> at buggy|fixed, with the triggering test present
+  compile:    {args: [dir]}
+  run_tests:  {args: [dir]}               # stdout: the test framework's OWN report (JUnit XML), never a summary
+  apply:      {args: [dir, patch]}        # applies a solver's patch file to <dir>
+
+variants:
+  buggy:
+    setup: [{verb: checkout, args: {revision: buggy}}, {verb: compile}]
+  fixed:
+    setup: [{verb: checkout, args: {revision: fixed}}, {verb: compile}]
+
+observable:
+  verb: run_tests
+  reader: junit-xml                       # the harness parses the framework's report
+  select: "{triggering_test}"             # from instance.json
+
+oracle:
+  kind: fail-to-pass
+  fails_on: buggy
+  passes_on: fixed
+
+negative_control: null                    # the buggy variant is the break; the oracle row covers it
+
+solver_input:
+  verb: apply
+  arg: patch
+  variant: buggy
+  probe_values: ["/bench/empty.patch", "/bench/gold.patch"]
+
+measure: null
+
+predicates:
+  - run: "git -C /work/repo rev-parse --verify {fixed_commit}^{{commit}}"
+    require: "exit zero"
+  - run: "git -C /work/repo rev-parse --verify {buggy_commit}^{{commit}}"
+    require: "exit zero"

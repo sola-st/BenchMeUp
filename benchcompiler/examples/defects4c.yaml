@@ -1,0 +1,65 @@
+# Real paper: Defects4C (ASE 2025 per external confirmation;
+# arXiv:2510.11059). Reverse-engineered from the actual PDF methodology
+# section, not the abstract.
+
+task: |
+  Repair a buggy C/C++ function so that the fix passes the specific unit
+  test(s) that expose the bug, without needing to touch unrelated code.
+
+instance: |
+  input: a buggy C/C++ function plus its surrounding repository/build context
+  expected output: a patch (modified function) that fixes the bug
+
+data: |
+  GitHub C/C++ repositories with >=200 stars, redistributable licenses,
+  commits dated Jan 2015-Dec 2023 (via BigQuery/GH Archive). Candidate = a
+  single commit that: modifies exactly one function (not multiple, not an
+  add/remove), is not a merge commit, touches only C/C++ files, and has at
+  least one associated unit test that fails on the pre-commit version and
+  passes on the post-commit version (a "bug-revealing test").
+
+admissibility: |
+  GitHub repositories in C or C++, at least 200 stars, under a redistributable license.
+
+correctness: |
+  fail-to-pass-tests: apply the submitted patch and execute the bug-revealing
+  test(s) identified during construction (test passes on the developer's
+  fixed version, fails on the buggy version); the submission is correct iff
+  those tests pass after patching. Verified via a Docker-based execution
+  service (isolated per-bug container).
+
+interface: |
+  Docker-backed HTTP service with endpoints: /extract_anchor_patch (parses
+  patches out of raw LLM output and anchors them into source), /fix_with_patch
+  (applies a patch in an isolated container, returns pass/fail + categorized
+  error), /reproduce (resets the verification environment for a bug),
+  /error_dig (classifies failure type: compile/build/link/test, with stack
+  trace parsing). Redis + build cache for high-throughput concurrent use.
+
+scale: |
+  248 buggy functions + 102 vulnerable functions (final, human-confirmed);
+  mined from ~9M validated commits, narrowed to 76K single-function commits,
+  then 3,785 (+102 vuln) execution-verified candidates, then multi-round
+  dual-annotation with arbitration.
+
+criteria: |
+  - single-function-modifying commits only (excludes multi-file/multi-hunk changes)
+  - keyword-filtered bug-related commit messages (fix, solve, repair, bug, issue, problem, error, fault, vulnerability)
+  - excludes forks with duplicated history, MD5-duplicate diffs, non-C/C++ files
+  - excludes commits with excessively large diffs (likely refactors, not targeted fixes)
+  - CVE-linked commits require a single patched commit ID (unambiguous attribution)
+
+quality: |
+  - two annotators (5+ years programming, 3+ years testing/analysis experience)
+    independently label each candidate, discuss discrepancies, arbitrated by a
+    third independent reviewer; a third round re-verifies a resample for reliability
+  - execution-based pre-filter (bug-revealing test must actually exist) before any human review
+
+examples: |
+  - known-valid: any of the 248 final Defects4C_bug entries (function + bug-revealing
+    test where the developer's actual fix is known to pass)
+  - known-invalid: a commit modifying multiple functions, or lacking any test whose
+    outcome flips between buggy and fixed versions
+
+constraints: |
+  - C/C++ only; commits dated before 2024-01-01 (contamination boundary implied by mining window)

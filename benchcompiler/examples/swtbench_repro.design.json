@@ -1,0 +1,234 @@
+{
+ "contract": {
+  "artifact_variants": [
+   {
+    "name": "prefix",
+    "description": "the repository snapshot at the pre-fix commit (the commit before the PR merged), installed with its test suite runnable, with the PR's own added/modified test applied. The check runs that test and passes only if it FAILS here -- the issue is reproducible",
+    "check_cmd": "sh check_prefix.sh .",
+    "expect": "pass",
+    "results": "junit-xml",
+    "expect_failures": 1
+   },
+   {
+    "name": "postfix",
+    "description": "the repository snapshot at the PR's merge commit (the real fix applied), installed with its test suite runnable. The check runs the same test and passes only if it PASSES here",
+    "check_cmd": "sh check_postfix.sh .",
+    "expect": "pass",
+    "results": "junit-xml",
+    "expect_failures": 0
+   }
+  ],
+  "measure": null,
+  "observables": [],
+  "parameters": []
+ },
+ "problems": [],
+ "rounds_used": 1,
+ "obligations": [],
+ "lifecycle": {
+  "design": {
+   "consumer_session": [
+    {
+     "command": "list",
+     "expect": "Available instances: swe-bench-1234, swe-bench-5678"
+    },
+    {
+     "command": "info swe-bench-1234",
+     "expect": "Instance: swe-bench-1234\nRepo: https://github.com/psf/requests\nBase commit: a1b2c3d\nProblem: Requests fails to handle timeout in streaming response\nStatus: delivered"
+    },
+    {
+     "command": "start swe-bench-1234",
+     "expect": "Instance swe-bench-1234 started. Use exec to run commands."
+    },
+    {
+     "command": "exec swe-bench-1234 -- pytest tests/test_timeout.py::test_stream_timeout",
+     "expect": "Test output: ... (test fails on prefix, passes on postfix)"
+    },
+    {
+     "command": "stop swe-bench-1234",
+     "expect": "Instance swe-bench-1234 stopped."
+    },
+    {
+     "command": "rebuild-prefix swe-bench-1234",
+     "expect": "Prefix snapshot rebuilt."
+    },
+    {
+     "command": "check-prefix swe-bench-1234",
+     "expect": "Prefix check: test fails as expected."
+    },
+    {
+     "command": "rebuild-postfix swe-bench-1234",
+     "expect": "Postfix snapshot rebuilt."
+    },
+    {
+     "command": "check-postfix swe-bench-1234",
+     "expect": "Postfix check: test passes as expected."
+    }
+   ],
+   "key": {
+    "repo_url": "git_url",
+    "base_commit": "none",
+    "problem_statement": "none"
+   },
+   "normalize": {
+    "repo_url": "git_url",
+    "base_commit": "none",
+    "problem_statement": "none"
+   },
+   "states": [
+    {
+     "name": "FETCHED",
+     "requires": [
+      "sandbox",
+      "repo_url",
+      "base_commit",
+      "problem_statement",
+      "test_patch",
+      "fail_to_pass"
+     ],
+     "requires_true": [],
+     "records": [],
+     "self_graded": true,
+     "enforces": "The instance must originate from a real, merged pull request that explicitly closes a reported issue.",
+     "instruction": "Clone the repository at the given repo_url into the sandbox. Checkout the base_commit. Record the repo_url, base_commit, problem_statement, test_patch, and fail_to_pass metadata. No automated verification is performed at this stage."
+    },
+    {
+     "name": "TEST_PATCH_APPLIED",
+     "requires": [
+      "sandbox",
+      "test_patch_applied_flag"
+     ],
+     "requires_true": [],
+     "records": [],
+     "self_graded": true,
+     "enforces": "The PR must add or modify a test file or test function within the same PR that claims to demonstrate the bug.",
+     "instruction": "Apply the test_patch to the pre-fix snapshot (base_commit checkout). Verify the patch applies cleanly. Record test_patch_applied_flag as true. No automated verification is performed at this stage."
+    },
+    {
+     "name": "PREFIX_INSTALLED",
+     "requires": [
+      "sandbox",
+      "prefix_install_success"
+     ],
+     "requires_true": [
+      "prefix_install_success"
+     ],
+     "records": [],
+     "self_graded": true,
+     "enforces": "Both the pre-fix and post-fix snapshots must be installable and able to run the project's test harness (setup/install/test-invocation must succeed).",
+     "instruction": "Install the project dependencies and build the project on the pre-fix snapshot (with test_patch applied). Run the project's setup/install commands. Record prefix_install_success as true if installation succeeds. No automated verification is performed at this stage."
+    },
+    {
+     "name": "PREFIX_TEST_FAILED",
+     "requires": [
+      "sandbox",
+      "test_output_prefix"
+     ],
+     "requires_true": [],
+     "records": [
+      "test_output_prefix"
+     ],
+     "rederives": {
+      "test_output_prefix": {
+       "cmd": "test_command_prefix",
+       "mode": "digest",
+       "normalize": "output_normalizer_prefix"
+      }
+     },
+     "enforces": "The PR's own added/modified test must fail when executed on the pre-fix snapshot (with the test applied) and pass when executed on the PR's merge commit; both outcomes must be confirmed by automated test runs.",
+     "instruction": "Run the submitted test against the pre-fix snapshot using the project's test harness. Capture the full test output to test_output_prefix. The test must fail. The harness will re-derive this output by running the same command and comparing digests. If the test runner's honest output embeds run-varying tokens (timings, headers), write a normalizer script (stdin: raw output, stdout: canonical form, exit 0) inside the sandbox and record its absolute path as output_normalizer_prefix/output_normalizer_postfix; digests are then compared through it. Do not record one otherwise."
+    },
+    {
+     "name": "POSTFIX_INSTALLED",
+     "requires": [
+      "sandbox",
+      "postfix_install_success"
+     ],
+     "requires_true": [
+      "postfix_install_success"
+     ],
+     "records": [],
+     "self_graded": true,
+     "enforces": "Both the pre-fix and post-fix snapshots must be installable and able to run the project's test harness (setup/install/test-invocation must succeed).",
+     "instruction": "Checkout the merge commit (post-fix snapshot). Install the project dependencies and build the project. Record postfix_install_success as true if installation succeeds. No automated verification is performed at this stage."
+    },
+    {
+     "name": "POSTFIX_TEST_PASSED",
+     "requires": [
+      "sandbox",
+      "test_output_postfix"
+     ],
+     "requires_true": [],
+     "records": [
+      "test_output_postfix"
+     ],
+     "rederives": {
+      "test_output_postfix": {
+       "cmd": "test_command_postfix",
+       "mode": "digest",
+       "normalize": "output_normalizer_postfix"
+      }
+     },
+     "enforces": "The PR's own added/modified test must fail when executed on the pre-fix snapshot (with the test applied) and pass when executed on the PR's merge commit; both outcomes must be confirmed by automated test runs.",
+     "instruction": "Run the same submitted test against the post-fix snapshot (merge commit) using the project's test harness. Capture the full test output to test_output_postfix. The test must pass. The harness will re-derive this output by running the same command and comparing digests. If the test runner's honest output embeds run-varying tokens (timings, headers), write a normalizer script (stdin: raw output, stdout: canonical form, exit 0) inside the sandbox and record its absolute path as output_normalizer_prefix/output_normalizer_postfix; digests are then compared through it. Do not record one otherwise."
+    },
+    {
+     "name": "VARIANTS_MATERIALIZED",
+     "requires": [
+      "sandbox",
+      "variants_root"
+     ],
+     "self_graded": true,
+     "instruction": "Materialise both declared variants (prefix, postfix) under one directory and record it as variants_root. For each variant write BOTH <variants_root>/setup_<name>.sh -- taking the target directory as its only argument and setting that variant up there from scratch -- and <variants_root>/<name>/, your own materialised copy. The harness re-runs each setup script into a fresh directory and runs that variant's check there."
+    },
+    {
+     "name": "DELIVERED",
+     "requires": [
+      "sandbox",
+      "repo_url",
+      "base_commit",
+      "problem_statement",
+      "test_patch",
+      "fail_to_pass",
+      "test_output_prefix",
+      "test_output_postfix",
+      "prefix_install_success",
+      "postfix_install_success"
+     ],
+     "requires_true": [
+      "prefix_install_success",
+      "postfix_install_success"
+     ],
+     "records": [],
+     "discriminates": {
+      "clean": "test_output_postfix",
+      "perturbed": "test_output_prefix",
+      "describe": "test passes on postfix but fails on prefix"
+     },
+     "enforces": "Project must be a Python project and must not be one of the 12 excluded repositories: astropy/astropy, django/django, matplotlib/matplotlib, mwaskom/seaborn, pallets/flask, psf/requests, pydata/xarray, pylint-dev/pylint, pytest-dev/pytest, scikit-learn/scikit-learn, sphinx-doc/sphinx, sympy/sympy.",
+     "instruction": "Verify that the repository is a Python project and not in the exclusion list. Confirm that all required fields are present and that the discriminates block shows the test fails on prefix and passes on postfix. This is the final state."
+    }
+   ],
+   "terminal": "DELIVERED"
+  },
+  "problems": [],
+  "rounds_used": 5,
+  "problems_before_hand_finish": [
+   "variants are declared but no state requires variants_root"
+  ]
+ },
+ "hand_finished": [
+  {
+   "answers": "grader finding: 'variants are declared but no state requires variants_root' (attempts 1-3, 15 rounds total, finding survived all verbatim feedback)",
+   "edit": "inserted VARIANTS_MATERIALIZED before DELIVERED, requires [sandbox, variants_root]; instantiate wires the executable variants_are_materialized gate onto it"
+  },
+  {
+   "answers": "live-run evidence, not a grader finding: r30/r31/r32 goaccess died at its digest control with a fresh digest every harness re-run; pytest output embeds durations, same class. The designer prompt teaches rederives normalize as of this session but the model omitted it",
+   "edit": "added optional normalize fields (output_normalizer_prefix/postfix) to both digest-mode rederives and extended the two test states' instructions; the field is per-candidate optional and not in requires"
+  },
+  {
+   "answers": "live evidence 2026-08-19, d4j pool audit: 12/12 instances had a check side whose exit code proved nothing -- jadx-2854's script counted any error (gradlew: not found included) as 'bug observable', netty-21dd/jadx-2835/tomcat-dcb checks print NOTHING and exit 0, tomcat's rebuild fails on 'reference is not a tree' and still 'passed'. The contract never said what evidence a check produces, so every layer degraded to exit codes.",
+   "edit": "artifact_variants declare results: junit-xml + expect_failures (buggy 1, fixed/postfix 0; boca: results none + written reason -- digest comparison is its evidence). Check-script instruction now mandates report-producing runs, never /dev/null, errors exit 2 INCONCLUSIVE. Enforced by the undeclared_check_evidence audit (fails closed), the materialisation gate, and the certifier sweep -- all judging on parsed JUnit XML, exit codes decide nothing."
+  }
+ ]
+}

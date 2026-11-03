@@ -1,0 +1,44 @@
+# Real paper: Mokav (Journal of Systems and Software, 2025; arXiv:2406.10375)
+# See spec/benchspec-explainer.html for the field-by-field mapping.
+# Expected: ACCEPT.
+
+task: Generate a test input that makes two versions of a program behave differently.
+instance: |
+  input: two Python programs P (buggy) and Q (fixed) + the problem statement
+  expected output: a test input on which P and Q produce different outputs
+data: |
+  Codeforces submissions (via Code4Bench): per author+problem, the last
+  wrong-answer submission paired with the first accepted one.
+admissibility: |
+  not applicable: the sources are a fixed published corpus -- Codeforces submissions as
+  distributed by Code4Bench -- rather than a population sampled per run.
+
+correctness: |
+  Execute both programs on the submitted input: accept iff outputs differ.
+interface: |
+  CLI: `bench fetch <id>`, `bench eval <id> <input-file>` -> accept/reject + both outputs.
+scale: |
+  ~300 instances (reduced from the paper's 1500 to fit a modest first-run
+  budget); human budget 0h; compute budget 90 CPU-hours -- this must cover
+  NOT ONLY oracle verification (2 executions/instance) BUT the construction-
+  time search for at least one compliant difference-exposing input per pair
+  (see quality), which is the expensive part and does not scale down
+  proportionally with instance count (search cost is dominated by attempts
+  over candidate pairs, most of which won't yield a compliant input, not by
+  the final success count).
+criteria: |
+  - pure Python, no third-party imports
+  - <=2500 tokens/program, <=100 tokens/test input
+  - >=2 independently-passing reference submissions per problem
+
+quality: |
+  - construction must find and verify at least one difference-exposing
+    input satisfying the <=100-token limit for each retained pair (a WA
+    verdict alone does not guarantee a *compliant* one exists); pairs
+    where no compliant input is found within a bounded search budget are
+    dropped, not shipped as unsolvable instances
+
+access: |
+  - platform: code4bench, key_env: none (existing indexed corpus/tool wrapping Codeforces submissions), budget: n/a (pre-indexed, not live-rate-limited)
+  - platform: codeforces, key_env: none (public API, used only if Code4Bench lacks a needed field), budget: 1 req/2s (documented courtesy limit)
+  - platform: openai, key_env: OPENAI_API_KEY, budget: $30 total (differencing-input search assistance + collector-script iteration)

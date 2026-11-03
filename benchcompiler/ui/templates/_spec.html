@@ -1,0 +1,6 @@
+<p class="sub">The hand-written input to the pipeline (<code>{{ spec.rel }}</code>).</p>
+{% for k, v in spec.fields.items() %}
+  <h3>{{ k }}</h3>
+  {% if v is string %}<pre>{{ v }}</pre>{% else %}<pre>{{ v|tojson_pretty }}</pre>{% endif %}
+{% endfor %}
+<details><summary>The whole file</summary><pre>{{ spec.text }}</pre></details>

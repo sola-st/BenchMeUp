@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "macros.html" import budget %}
+{% block title %}Running now{% endblock %}
+{% block content %}
+<h1>Running now</h1>
+<p class="sub">Every live search and construction agent, by run. Cost and wall clock are each agent's own meters
+against its budget.</p>
+<div class="live" id="running-groups">
+{% for g in groups %}
+<section class="group">
+  <h2><a href="{{ g.url }}">{{ g.task }} · {{ g.kind }} {{ g.label }}</a>
+    <span class="muted small">{{ g.n }} running · {{ g.cost|money }} spent · {{ g.model|model }}</span></h2>
+  <table class="dense">
+    <thead><tr><th>agent</th><th class="num">cycle</th><th>cost</th><th>wall clock</th>
+      <th>{{ 'candidates' if g.kind == 'search' else 'working on' }}</th><th>last activity</th></tr></thead>
+    <tbody>
+    {% for s in g.agents %}
+    <tr>
+      <td><a href="{{ g.url }}/{{ s.attempt if g.kind == 'search' else s.name }}">{{ s.attempt if g.kind == 'search' else s.name }}</a></td>
+      <td class="num">{{ s.cycle or '-' }}</td>
+      <td class="w-budget">{{ budget(s.cost, s.cost_limit, 'money') }}</td>
+      <td class="w-budget">{{ budget(s.wall, s.wall_limit, 'dur') }}</td>
+      <td>{% if g.kind == 'search' %}{{ s.candidates }}{% elif s.current %}<span title="{{ s.current.key }}">{{ s.current.key|key }}</span> <span class="badge running">{{ s.current.state|state }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>
+      <td class="muted nowrap">{{ s.last_activity|ago }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}<p class="empty">No agent is running.</p>{% endfor %}
+</div>
+{% endblock %}

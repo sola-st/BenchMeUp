@@ -1,0 +1,43 @@
+# Operationalized version — from spec/example-walkthrough.md round 2.
+# Expected: ACCEPT at formalization (stage 1). The walkthrough has this
+# rejected later at BUDGET_EXCEEDED, but that's stage 2 (planning/pricing),
+# not implemented yet — this file only exercises stage 1.
+
+task: Decide whether a given test in a project snapshot is flaky.
+instance: |
+  input: repo snapshot + test id; the system may execute the test suite
+  expected output: label in {flaky, stable}
+data: |
+  All pytest tests in Python GitHub projects with >=1000 stars and an
+  actively maintained test suite; snapshot = default-branch head at
+  2026-07-01, frozen. Around 20 projects is fine.
+admissibility: |
+  Python projects on GitHub with at least 1000 stars and an actively maintained test suite.
+
+correctness: |
+  A test is flaky iff its outcome is not identical across 200 reruns in a
+  fixed container environment (same order, same seed policy). The
+  submitted label must match the rerun-derived label.
+interface: |
+  CLI: `bench checkout <id>` gives the snapshot + test id;
+  `bench eval <id> <label>` returns accept/reject.
+examples: |
+  known-flaky: pytest-dev/pytest#XXXX (timing), pandas#YYYY (order)
+  known-stable: two library unit tests (links)
+# HOW A SOLVER SUBMITS ITS ANSWER. Not invented: `interface` above already says it --
+# `bench eval <id> <label>` -- so the channel is a parameter named `label`. Added 2026-08-26
+# after a live formalize of this spec came back NO_SOLVER_INPUT: the front end has refused a
+# spec for omitting this block since 2026-08-19, and this example predates that.
+solver_input:
+  kind: parameter
+  name: label
+  describes: "the flaky/stable verdict a solver submits for one test"
+  probe_values: ["flaky", "stable"]
+
+parameters:
+  - name: label
+    kind: string
+    default: "stable"
+
+scale: |
+  ~2,000-4,000 labeled tests; compute cap 500 CPU-hours; human budget 0.

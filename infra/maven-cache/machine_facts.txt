@@ -1,0 +1,22 @@
+This machine runs a cache of the Maven repositories. Every container here reaches it:
+  @CACHE@/maven2/          Maven Central (also any file on it, a release zip included)
+  @CACHE@/gradle-plugins/  the Gradle plugin portal
+  @CACHE@/google/          Google's Maven repository
+Downloads through it are fast and do not count against the vendors' limits. Through the cache,
+each file is downloaded once.
+
+Use it for every Maven or Gradle download, on your machine and in the instance. In the
+Dockerfile, declare one build argument per repository, each defaulting to the vendor's own
+address:
+  ARG MAVEN_MIRROR=https://repo1.maven.org/maven2/
+  ARG GRADLE_PLUGIN_MIRROR=https://plugins.gradle.org/m2/
+  ARG GOOGLE_MAVEN_MIRROR=https://dl.google.com/dl/android/maven2/
+Use each argument as it is; never derive one address from another (the defaults do not share
+a pattern). In a RUN line, write them into the build tool's configuration so that builds at
+run time use them too: for Maven, a mirror with <mirrorOf>*</mirrorOf> in ~/.m2/settings.xml
+pointing at $MAVEN_MIRROR; for Gradle, an init script in ~/.gradle/init.d whose plugin
+repositories are $GRADLE_PLUGIN_MIRROR and $MAVEN_MIRROR and whose project repositories are
+$MAVEN_MIRROR (and $GOOGLE_MAVEN_MIRROR when the build needs Google's). Fetch other files from
+Maven Central the same way, as ${MAVEN_MIRROR}<path>. The system builds your Dockerfile with
+the three arguments set to the cache. Anywhere else the defaults are the vendors' addresses, so
+the instance still builds on a machine without the cache.

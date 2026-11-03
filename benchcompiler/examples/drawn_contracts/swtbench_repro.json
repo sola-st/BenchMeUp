@@ -1,0 +1,202 @@
+{
+ "verbs": {
+  "checkout": {
+   "args": [
+    "dir",
+    "commit"
+   ]
+  },
+  "apply_patch": {
+   "args": [
+    "dir",
+    "patch_file"
+   ]
+  },
+  "run_test": {
+   "args": [
+    "dir"
+   ]
+  },
+  "break": {
+   "args": [
+    "dir"
+   ]
+  },
+  "apply_test": {
+   "args": [
+    "dir",
+    "submission"
+   ]
+  }
+ },
+ "variants": {
+  "prefix": {
+   "setup": [
+    {
+     "verb": "checkout",
+     "args": {
+      "commit": "{base_commit}"
+     }
+    },
+    {
+     "verb": "apply_patch",
+     "args": {
+      "patch_file": "{test_patch_file}"
+     }
+    }
+   ]
+  },
+  "postfix": {
+   "setup": [
+    {
+     "verb": "checkout",
+     "args": {
+      "commit": "{merge_commit}"
+     }
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "run_test",
+  "compare": "exact",
+  "reader": "junit-xml",
+  "select": "{test_name}"
+ },
+ "oracle": {
+  "kind": "fail-to-pass",
+  "fails_on": "prefix",
+  "passes_on": "postfix"
+ },
+ "negative_control": {
+  "verb": "break",
+  "variant": "postfix",
+  "expect": "observable_changes",
+  "then": null
+ },
+ "solver_input": {
+  "verb": "apply_test",
+  "arg": "submission",
+  "variant": "prefix",
+  "probe_values": [
+   "/bench/gold_test.py",
+   "/bench/dummy_test.py"
+  ]
+ },
+ "measure": null,
+ "predicates": [
+  {
+   "run": "git -C /work/repo rev-parse --verify {base_commit}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "git -C /work/repo rev-parse --verify {merge_commit}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /work/{test_patch_file}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /work/{fix_patch_file}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /bench/gold_test.py",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /bench/dummy_test.py",
+   "require": "exit zero"
+  },
+  {
+   "run": "python -m py_compile /bench/gold_test.py",
+   "require": "exit zero"
+  },
+  {
+   "run": "python -m py_compile /bench/dummy_test.py",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "checkout": "Check out the given commit in the repository at <dir>/repo using git checkout. Prints nothing on stdout.",
+  "apply_patch": "Apply the patch file at <patch_file> to the repository at <dir>/repo using git apply. Prints nothing on stdout.",
+  "run_test": "Run the test at the path specified in instance.json's solver_test_path (relative to <dir>/repo) using pytest with --junitxml=- to output JUnit XML to stdout. The script exits with the test runner's exit code.",
+  "break": "Revert the fix patch on the repository at <dir>/repo by applying the reverse of the fix patch file (from instance.json's fix_patch_file) using git apply -R. Prints nothing on stdout.",
+  "apply_test": "Copy the file at <submission> to <dir>/repo/<solver_test_path> (from instance.json), overwriting any existing file. Prints nothing on stdout."
+ },
+ "_stages": [
+  {
+   "name": "environment",
+   "files": [
+    "Dockerfile",
+    "setup.sh",
+    "instance.json",
+    "test_patch.patch",
+    "fix_patch.patch"
+   ],
+   "goal": "Install Python and pytest in the Dockerfile. setup.sh must clone the repository at the base_commit (from instance.json) into /work/repo using a shallow clone (depth 1) of that commit. instance.json must contain all required fields. The patch files (test_patch.patch and fix_patch.patch) must be written as plain text files. The checker will build the image, run setup.sh, and verify that the base_commit is resolvable and the patch files exist.",
+   "done_when": "The image builds, setup.sh exits 0, git -C /work/repo rev-parse --verify {base_commit}^{{commit}} succeeds, and both patch files exist under /work/.",
+   "verbs": [],
+   "rows": [
+    "replays",
+    "identity"
+   ]
+  },
+  {
+   "name": "setup_scripts",
+   "files": [
+    "checkout.sh",
+    "apply_patch.sh",
+    "gold_test.py",
+    "dummy_test.py"
+   ],
+   "goal": "Write checkout.sh and apply_patch.sh that handle commits and patches robustly (no stdout, handle already-checked-out). Create gold_test.py (the correct test that reproduces the bug, extracted from the test_patch) and dummy_test.py (a trivial test that always passes). The checker will run the variant setups (checkout and apply_patch) and verify that the test file exists at solver_test_path after applying the test patch. It will also check that gold_test.py and dummy_test.py exist and are valid Python files.",
+   "done_when": "checkout.sh and apply_patch.sh work correctly (prefix variant's test file exists after applying test_patch, postfix variant's test file exists after checkout), gold_test.py and dummy_test.py exist and pass Python syntax check.",
+   "verbs": [
+    "checkout",
+    "apply_patch"
+   ],
+   "rows": [
+    "variants_build"
+   ]
+  },
+  {
+   "name": "test_scripts",
+   "files": [
+    "run_test.sh",
+    "break.sh",
+    "apply_test.sh"
+   ],
+   "goal": "Write run_test.sh that runs pytest with --junitxml=- and outputs the XML to stdout. break.sh applies the reverse of the fix patch. apply_test.sh copies a submission file to the test path. The checker will run the observable (run_test) on both variants, run the negative control (break on postfix), and run the solver_input (apply_test with probe values). All scripts must produce no extraneous output.",
+   "done_when": "run_test.sh produces valid JUnit XML for a test, break.sh changes the observable (test fails after breaking), apply_test.sh correctly replaces the test file and the observable changes accordingly.",
+   "verbs": [
+    "run_test",
+    "break",
+    "apply_test"
+   ],
+   "rows": [
+    "stable",
+    "input_sensitive",
+    "oracle",
+    "can_fail",
+    "solver_input"
+   ]
+  }
+ ],
+ "_instance_fields": [
+  "repo_url",
+  "base_commit",
+  "merge_commit",
+  "test_patch_file",
+  "fix_patch_file",
+  "solver_test_path",
+  "test_name"
+ ],
+ "_numbers_quoted": {},
+ "_stage_prompts": [
+  "STAGE 1 of 3: environment\n\nWhere you are\n=============\nYou are building an instance of a benchmark that turns a real GitHub issue and its pre-fix repository snapshot into a reproducible test. This is the first stage of three. Nothing exists yet. You will write a Dockerfile, setup.sh, instance.json, test_patch.patch, and fix_patch.patch. The Dockerfile must install Python and pytest. setup.sh must shallow-clone the repository at the base_commit from instance.json into /work/repo. The patch files must be plain text.\n\nGoal of this stage\n==================\nIn this stage you must create the minimal environment that the benchmark's correctness check relies on: a container with Python and pytest, a shallow clone of the repository at the exact pre-fix commit, and the two patch files (test_patch.patch and fix_patch.patch) as plain text. This matters because the benchmark's measurement depends on the test patch failing on the pre-fix snapshot and the fix patch passing on the post-fix snapshot. If the base_commit is wrong or the patches are missing or malformed, the entire measurement is invalid.\n\nWhat to write into /bench\n=========================\n  Dockerfile     FROM a base image; install the toolchain and every dependency the build\n                 and the checks need. No clone, no build, no source in the image.\n  setup.sh       runs once inside that container from /bench, with the network: clone the\n                 repository at the exact commit into /work/repo and leave /work ready. No build.\n  instance.json  a JSON object with base_commit, test_patch_file, merge_commit, test_name, fix_patch_file, repo_url, solver_test_path.\n  test_patch.patch\n  fix_patch.patch\n\nHow it is checked\n=================\nbench_check(sandbox=<name>) copies /bench out of your sandbox, builds a FRESH container from\nyour Dockerfile, runs setup.sh, and runs your scripts there. Nothing in your sandbox is used.\nThis stage's checks, in order (the report stops at the first failure):\n  - container builds, setup runs [replays]\n  - commit and files exist [identity]\nThe identity commands, run with your instance.json values:\n  git -C /work/repo rev-parse --verify {base_commit}^{{commit}}   -> require: exit zero\n  git -C /work/repo rev-parse --verify {merge_commit}^{{commit}}   -> require: exit zero\n  test -f /work/{test_patch_file}   -> require: exit zero\n  test -f /work/{fix_patch_file}   -> require: exit zero\n  test -f /bench/gold_test.py   -> require: exit zero\n  test -f /bench/dummy_test.py   -> require: exit zero\n  python -m py_compile /bench/gold_test.py   -> require: exit zero\n  python -m py_compile /bench/dummy_test.py   -> require: exit zero\n\nTraps\n=====\n  - Using a full clone instead of a shallow clone (depth 1) of the base_commit; this wastes time and disk space and may fail if the repository is large. Use `git clone --depth 1 --branch <commit>` or `git fetch --depth 1`.\n  - Writing instance.json with missing or incorrectly named fields (e.g., 'base_commit' instead of 'base_commit', or omitting 'repo', 'patch', 'test_patch', 'problem_statement', 'FAIL_TO_PASS'). The instance.json must contain exactly those fields.\n  - Forgetting to install pytest in the Dockerfile; the test execution will later fail because pytest is required to run the test.\n  - Placing the clone in a directory other than /work/repo; setup.sh must clone into that exact path because the subsequent stages rely on that path.\n  - Writing the patch files with binary or non-UTF-8 content; they must be plain text so that git apply can use them later.\n\nDone when\n=========\nbench_check reports every check above as ok. Then call bench_deliver(sandbox=<name>): the stage closes and you get the next stage's instruction. Do not write the next stage's files before that.\n\nExample of a passing report for this stage\n==========================================\n   1 container builds, setup runs [replays]             ok\n   2 commit and files exist [identity]                  ok",
+  "STAGE 2 of 3: setup_scripts\n\nWhere you are\n=============\nYou are building an instance of this benchmark as a self-contained directory of scripts that, when run in a fresh container, reconstructs a bug-reproducing test from a real GitHub issue. Earlier stages established that the container builds and the setup script runs successfully, leaving the repository at the pre-fix commit with all dependencies installed and the test suite runnable. The commit and files exist in the expected locations. Nothing else has been created yet.\n\nGoal of this stage\n==================\nIn this stage, you must write checkout.sh and apply_patch.sh to robustly handle git operations without printing to stdout, and create gold_test.py (the exact test that reproduces the bug, extracted from the test_patch) and dummy_test.py (a trivial passing test). These scripts and files are essential because the harness will later use them to set up both the prefix and postfix variants, and the gold test is the oracle that the solver's output must match.\n\nWhat to write into /bench\n=========================\n  checkout.sh <dir> <commit>\n      Check out the given commit in the repository at <dir>/repo using git checkout. Prints nothing on stdout.\n  apply_patch.sh <dir> <patch_file>\n      Apply the patch file at <patch_file> to the repository at <dir>/repo using git apply. Prints nothing on stdout.\n  gold_test.py\n  dummy_test.py\nThe harness materializes each version into its own randomly named directory <dir>, in this order:\n  prefix: checkout.sh <dir> {base_commit}; then apply_patch.sh <dir> {test_patch_file}\n  postfix: checkout.sh <dir> {merge_commit}\n\nHow it is checked\n=================\nbench_check(sandbox=<name>) copies /bench out of your sandbox, builds a FRESH container from\nyour Dockerfile, runs setup.sh, and runs your scripts there. Nothing in your sandbox is used.\nThis stage's checks, in order (the report stops at the first failure):\n  - both versions build [variants_build]\n\nTraps\n=====\n  - Do not let checkout.sh or apply_patch.sh print anything to stdout; the harness expects silent operation, so redirect any git output to stderr or /dev/null.\n  - Do not hardcode the repository directory path; the scripts receive the directory as the first argument, so use that parameter instead of a fixed path like /repo.\n  - Do not assume the repository is already at the target commit; checkout.sh must handle the case where the desired commit is already checked out without erroring.\n  - Do not write gold_test.py by copying the entire test_patch verbatim; extract only the test function or class that reproduces the bug, and ensure it is a valid, runnable Python file.\n  - Do not forget that dummy_test.py must be a trivial test that always passes (e.g., def test_dummy(): assert True) so the harness can verify the test runner works.\n  - Do not include any import or dependency that is not already installed in the container; the gold test must run in the pre-fix environment without additional packages.\n\nDone when\n=========\nbench_check reports every check above as ok. Then call bench_deliver(sandbox=<name>): the stage closes and you get the next stage's instruction. Do not write the next stage's files before that.\n\nExample of a passing report for this stage\n==========================================\n   3 both versions build [variants_build]               ok",
+  "STAGE 3 of 3: test_scripts\n\nWhere you are\n=============\nYou are building an instance of a benchmark that turns a real GitHub issue and repository snapshot into a reproducible bug test. Earlier stages have set up the container, installed the project, and ensured both the pre-fix (prefix) and post-fix (postfix) snapshots build and run their test suites. The repository is checked out at the base commit, the fix patch is applied, and the test patch (the PR's own test) is in place. Now you need to write the scripts that the harness will use to evaluate a solver's submission: run_test.sh, break.sh, and apply_test.sh.\n\nGoal of this stage\n==================\nIn this stage, you must write three scripts that enable the harness to measure whether a submitted test reproduces the bug. run_test.sh runs pytest with --junitxml=- on the test path specified in instance.json, outputting JUnit XML to stdout. break.sh reverts the fix patch using git apply -R, so the bug is present. apply_test.sh copies a submission file to the test path. These scripts are essential for the oracle: the harness runs them on prefix (expects test failure) and postfix (expects test pass), and also checks that breaking the fix causes the test to fail.\n\nWhat to write into /bench\n=========================\n  run_test.sh <dir>\n      Run the test at the path specified in instance.json's solver_test_path (relative to <dir>/repo) using pytest with --junitxml=- to output JUnit XML to stdout. The script exits with the test runner's exit code.\n  break.sh <dir>\n      Revert the fix patch on the repository at <dir>/repo by applying the reverse of the fix patch file (from instance.json's fix_patch_file) using git apply -R. Prints nothing on stdout.\n  apply_test.sh <dir> <submission>\n      Copy the file at <submission> to <dir>/repo/<solver_test_path> (from instance.json), overwriting any existing file. Prints nothing on stdout.\nrun_test.sh prints the test framework's own JUnit XML report on stdout, unmodified; the harness reads test {test_name} from it.\nbreak.sh <dir> corrupts the postfix version's computation so that the result changes; a break the result cannot reveal is refused.\n\nHow it is checked\n=================\nbench_check(sandbox=<name>) copies /bench out of your sandbox, builds a FRESH container from\nyour Dockerfile, runs setup.sh, and runs your scripts there. Nothing in your sandbox is used.\nThis stage's checks, in order (the report stops at the first failure):\n  - same output every run [stable]\n  - output depends on the input [input_sensitive]\n  - fails on prefix, passes on postfix [oracle]\n  - the break is detected [can_fail]\n  - a submission changes the result [solver_input]\nThe check must FAIL on prefix and PASS on postfix.\n\nTraps\n=====\n  - Using a hardcoded test path instead of reading solver_test_path from instance.json; always parse the JSON with jq or a shell variable.\n  - Forgetting to handle the directory argument: run_test.sh <dir> must operate on <dir>/repo; change directory or prefix paths accordingly.\n  - In break.sh, applying the wrong patch (e.g., the test patch) instead of the fix_patch_file; use git apply -R on the correct file from instance.json.\n  - In apply_test.sh, printing any output to stdout (e.g., cp -v) will corrupt the harness's measurement; use cp with no flags or redirect stderr.\n  - Not ensuring the target directory for the test file exists before copying; use mkdir -p if needed, but suppress any output.\n\nDone when\n=========\nbench_check reports every check above as ok. Then call bench_deliver(sandbox=<name>): the candidate is delivered.\n\nExample of a passing report for this stage\n==========================================\n   4 same output every run [stable]                     ok\n   5 output depends on the input [input_sensitive]      ok\n   6 fails on prefix, passes on postfix [oracle]        ok\n   7 the break is detected [can_fail]                   ok\n   8 a submission changes the result [solver_input]     ok"
+ ]
+}

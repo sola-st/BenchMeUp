@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Benchmarks{% endblock %}
+{% block content %}
+<h1>Packaged benchmarks</h1>
+<p class="sub">Phase 4's output: instances per set and task. Each set is named after the model that constructed its instances.</p>
+{% set set_names = sets|map(attribute='set')|unique|list %}
+{% set task_names = sets|map(attribute='task')|unique|sort|list %}
+{% if sets %}
+<table class="matrix narrow">
+  <thead><tr><th>set</th>{% for t in task_names %}<th class="num">{{ t }}</th>{% endfor %}<th class="num">total</th></tr></thead>
+  <tbody>
+  {% for s in set_names %}
+  {% set row = sets|selectattr('set', 'equalto', s)|list %}
+  <tr><td><b>{{ s }}</b></td>
+    {% for t in task_names %}{% set b = row|selectattr('task', 'equalto', t)|first %}
+    <td class="num">{% if b %}<a href="/benchmarks/{{ s }}/{{ t }}">{{ b.count }}</a>{% else %}<span class="muted">-</span>{% endif %}</td>
+    {% endfor %}
+    <td class="num">{{ row|sum(attribute='count') }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No packaged benchmark.</p>{% endif %}
+{% endblock %}

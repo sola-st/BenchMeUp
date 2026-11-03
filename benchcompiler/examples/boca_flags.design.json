@@ -1,0 +1,433 @@
+{
+  "contract": {
+    "artifact_variants": [
+      {
+        "name": "default",
+        "description": "the program built with NO optimization flags -- the functional reference. Its output is what every other compilation must reproduce, and its runtime is the unoptimized starting point",
+        "check_cmd": "sh check_default.sh .",
+        "expect": "pass",
+        "results": "none",
+        "results_none_reason": "digest comparison of program output is the evidence; no test framework runs"
+      },
+      {
+        "name": "optimized",
+        "description": "the same program built with the recorded optimizing flags (including -O3). Its output must match the default build's; its runtime is the bar a solver has to beat",
+        "check_cmd": "sh check_optimized.sh .",
+        "expect": "pass",
+        "results": "none",
+        "results_none_reason": "digest comparison of program output is the evidence; no test framework runs"
+      }
+    ],
+    "solver_input": {
+      "kind": "parameter",
+      "name": "cflags",
+      "describes": "the compiler flag configuration the solver proposes, applied to the same source",
+      "probe_values": [
+        "-O0",
+        "-O3"
+      ]
+    },
+    "negative_control": {
+      "break_cmd": "corruption_cmd",
+      "restore_cmd": "rebuild_cmd",
+      "check": "default",
+      "describes": "replace the built binary with one that does nothing, or corrupt a constant the output depends on"
+    },
+    "measure": {
+      "command": "{run_cmd} {input_path}",
+      "repetitions": {
+        "default": 5,
+        "min": 5,
+        "max": 100
+      },
+      "capture": [
+        {
+          "name": "runtime_ms",
+          "from": "wall_ms",
+          "aggregate": "median",
+          "unit": "ms"
+        },
+        {
+          "name": "output_digest",
+          "from": "stdout_sha256"
+        },
+        {
+          "name": "exit_code",
+          "from": "exit"
+        }
+      ],
+      "inputs": {
+        "generate": "bash {inputs_script} {out_dir}",
+        "each": "{input_path}"
+      }
+    },
+    "observables": [
+      {
+        "name": "runtime_ms",
+        "kind": "number",
+        "unit": "ms",
+        "aggregate": "median",
+        "plausible": {
+          "at_least": 0,
+          "at_most": 10000
+        }
+      },
+      {
+        "name": "output_digest",
+        "kind": "text"
+      },
+      {
+        "name": "exit_code",
+        "kind": "number",
+        "unit": "code"
+      }
+    ],
+    "parameters": [
+      {
+        "name": "repetitions",
+        "kind": "number",
+        "default": 5,
+        "min": 5
+      },
+      {
+        "name": "cflags",
+        "kind": "string",
+        "default": "-O0",
+        "describes": "the compiler flag configuration the solver proposes, applied to the same source"
+      }
+    ],
+    "separation": {
+      "observable": "runtime_ms",
+      "between": [
+        "default",
+        "optimized"
+      ],
+      "min_ratio": 1.05,
+      "cv_multiple": 5,
+      "describes": "The default build's median runtime on the costliest input must be at least 1.05x the optimized build's median runtime to prove the workload is sensitive to compiler flags."
+    },
+    "comparisons": [
+      {
+        "name": "output_match",
+        "observable": "output_digest",
+        "between": [
+          "default",
+          "optimized"
+        ],
+        "keyed": true,
+        "must_match": true
+      }
+    ],
+    "rederive": []
+  },
+  "problems": [],
+  "rounds_used": 1,
+  "obligations": [
+    "corruption_cmd",
+    "inputs_script",
+    "rebuild_cmd",
+    "run_cmd"
+  ],
+  "session": {
+    "design": {
+      "consumer_session": [
+        {
+          "command": "start <id>",
+          "why": "Boot the isolated environment for the instance.",
+          "expect": "last_exit_zero"
+        },
+        {
+          "command": "rebuild-default <id>",
+          "why": "Compile the program with no optimization flags to establish the baseline build.",
+          "expect": "last_exit_zero"
+        },
+        {
+          "command": "check-default <id>",
+          "why": "Run the baseline build on the costliest input to record its output digest and baseline runtime.",
+          "expect": {
+            "observable": "output_digest",
+            "present": true
+          }
+        },
+        {
+          "command": "rebuild-optimized <id>",
+          "why": "Compile the program with the reference optimization flags (-O3) to verify the build succeeds.",
+          "expect": "last_exit_zero"
+        },
+        {
+          "command": "check-optimized <id>",
+          "why": "Run the optimized build to ensure its output matches the baseline and to record its runtime.",
+          "expect": {
+            "observable": "exit_code",
+            "equals": 0
+          }
+        },
+        {
+          "command": "measure <id> --cflags \"-O2 -funroll-loops\"",
+          "why": "Attempt the task by submitting a candidate compiler flag configuration to be evaluated.",
+          "expect": {
+            "observable": "runtime_ms",
+            "at_least": 0
+          }
+        },
+        {
+          "command": "stop <id>",
+          "why": "Clean up the environment after evaluation.",
+          "expect": "last_exit_zero"
+        }
+      ]
+    },
+    "problems": [],
+    "rounds_used": 1,
+    "obligations": []
+  },
+  "lifecycle": {
+    "design": {
+      "consumer_session": [
+        {
+          "command": "start <id>",
+          "why": "Boot the isolated environment for the instance.",
+          "expect": "last_exit_zero"
+        },
+        {
+          "command": "rebuild-default <id>",
+          "why": "Compile the program with no optimization flags to establish the baseline build.",
+          "expect": "last_exit_zero"
+        },
+        {
+          "command": "check-default <id>",
+          "why": "Run the baseline build on the costliest input to record its output digest and baseline runtime.",
+          "expect": {
+            "observable": "output_digest",
+            "present": true
+          }
+        },
+        {
+          "command": "rebuild-optimized <id>",
+          "why": "Compile the program with the reference optimization flags (-O3) to verify the build succeeds.",
+          "expect": "last_exit_zero"
+        },
+        {
+          "command": "check-optimized <id>",
+          "why": "Run the optimized build to ensure its output matches the baseline and to record its runtime.",
+          "expect": {
+            "observable": "exit_code",
+            "equals": 0
+          }
+        },
+        {
+          "command": "measure <id> --cflags \"-O2 -funroll-loops\"",
+          "why": "Attempt the task by submitting a candidate compiler flag configuration to be evaluated.",
+          "expect": {
+            "observable": "runtime_ms",
+            "at_least": 0
+          }
+        },
+        {
+          "command": "stop <id>",
+          "why": "Clean up the environment after evaluation.",
+          "expect": "last_exit_zero"
+        }
+      ],
+      "key": [
+        "repo_url",
+        "main_source_file",
+        "commit_hash"
+      ],
+      "normalize": {
+        "repo_url": "git_url",
+        "main_source_file": "none",
+        "commit_hash": "none"
+      },
+      "states": [
+        {
+          "name": "SOURCE_ACQUIRED",
+          "requires": [
+            "repo_url",
+            "main_source_file",
+            "commit_hash",
+            "sandbox"
+          ],
+          "self_graded": true,
+          "instruction": "Clone the repository into the sandbox. Record the repository URL, the main source file path, and the commit hash."
+        },
+        {
+          "name": "DEFAULT_BUILD_CONFIGURED",
+          "requires": [
+            "rebuild_cmd"
+          ],
+          "self_graded": true,
+          "enforces": [
+            "the program builds with the target compiler using no optimization flags (the default build), and that build exits zero.",
+            "The recorded build recipe honours an exported CFLAGS"
+          ],
+          "instruction": "Write a build script that compiles the program with no optimization flags. The script must honour the CFLAGS environment variable, defaulting to -O0 if unset. Record this script as rebuild_cmd."
+        },
+        {
+          "name": "WORKING_SETUP_ESTABLISHED",
+          "requires": [
+            "run_small_cmd",
+            "small_output_digest"
+          ],
+          "records": [
+            "small_output_digest"
+          ],
+          "rederives": {
+            "small_output_digest": {
+              "cmd": "run_small_cmd",
+              "mode": "digest"
+            }
+          },
+          "enforces": [
+            "a working setup is established FIRST: some reference input, however small or fast, for which the default build produces a reproducible output."
+          ],
+          "instruction": "Establish a working setup by finding or creating a small reference input. Run the default build on it using a command recorded as run_small_cmd. Record the output digest as small_output_digest."
+        },
+        {
+          "name": "DETERMINISM_PROVED",
+          "requires": [
+            "corruption_cmd",
+            "corrupted_output_digest",
+            "corruption_reason"
+          ],
+          "records": [
+            "corrupted_output_digest"
+          ],
+          "rederives": {
+            "corrupted_output_digest": {
+              "cmd": "corruption_cmd",
+              "mode": "digest"
+            }
+          },
+          "discriminates": {
+            "clean": "small_output_digest",
+            "perturbed": "corrupted_output_digest",
+            "describe": "corruption_reason"
+          },
+          "enforces": [
+            "the program must be deterministic on the chosen reference inputs"
+          ],
+          "instruction": "Prove the output digest catches differences by providing a corruption_cmd that modifies the output. Record its digest as corrupted_output_digest and explain the corruption in corruption_reason."
+        },
+        {
+          "name": "INPUTS_GENERATED",
+          "requires": [
+            "inputs_script",
+            "generated_input_paths"
+          ],
+          "self_graded": true,
+          "enforces": [
+            "ONLY THEN, the instance generates SEVERAL further reference inputs of increasing COST using a script it carries, and ships all of them"
+          ],
+          "instruction": "Write a script to generate several reference inputs of increasing cost by scaling domain parameters. Run it and record the script as inputs_script and the generated paths as generated_input_paths."
+        },
+        {
+          "name": "COSTLIEST_INPUT_TIMED",
+          "requires": [
+            "run_cmd",
+            "default_timings_ms",
+            "exception_reason"
+          ],
+          "records": [
+            "default_timings_ms"
+          ],
+          "computes": {
+            "default_median_ms": {
+              "from": "default_timings_ms",
+              "agg": "median"
+            },
+            "default_mean_ms": {
+              "from": "default_timings_ms",
+              "agg": "mean"
+            },
+            "default_cv": {
+              "from": "default_timings_ms",
+              "agg": "cv"
+            }
+          },
+          "rederives": {
+            "default_timings_ms": {
+              "cmd": "run_cmd",
+              "mode": "observe"
+            }
+          },
+          "enforces": [
+            "The costliest input must bring the default build's median runtime to at least 1 second",
+            "The exception field has exactly one spelling for \"no exception applies\" (the literal `none`)"
+          ],
+          "instruction": "Run the default build on the costliest generated input at least 5 times using run_cmd. Record all runtimes in default_timings_ms. If the median runtime cannot be brought into the 1-10s band, record the reason in exception_reason; otherwise record 'none'."
+        },
+        {
+          "name": "OPTIMIZED_BUILD_TIMED",
+          "requires": [
+            "optimized_run_cmd",
+            "optimized_timings_ms",
+            "optimized_output_digest",
+            "variants_root",
+            "variant_run_cmds",
+            "default_median_ms"
+          ],
+          "records": [
+            "optimized_timings_ms",
+            "optimized_output_digest"
+          ],
+          "computes": {
+            "optimized_median_ms": {
+              "from": "optimized_timings_ms",
+              "agg": "median"
+            },
+            "optimized_mean_ms": {
+              "from": "optimized_timings_ms",
+              "agg": "mean"
+            },
+            "optimized_cv": {
+              "from": "optimized_timings_ms",
+              "agg": "cv"
+            },
+            "speedup_ratio": {
+              "from": [
+                "default_median_ms",
+                "optimized_median_ms"
+              ],
+              "agg": "ratio",
+              "at_least": 1.05
+            }
+          },
+          "rederives": {
+            "optimized_timings_ms": {
+              "cmd": "optimized_run_cmd",
+              "mode": "observe"
+            },
+            "optimized_output_digest": {
+              "cmd": "optimized_run_cmd",
+              "mode": "digest"
+            }
+          },
+          "enforces": [
+            "each such build produces output IDENTICAL to the default build's for the same input",
+            "each reference compilation records its own runtime ON THE LARGEST INPUT",
+            "ALL repetition timings (at least 5 runs) are recorded as a list together with their mean, median and coefficient of variation",
+            "a compilation that crashes, or whose output differs from the default build's, is recorded as such rather than silently dropped"
+          ],
+          "instruction": "Compile the program with -O3 and run it on the costliest input at least 5 times using optimized_run_cmd. Record the timings in optimized_timings_ms and the output digest in optimized_output_digest. Provide variants_root and variant_run_cmds to satisfy the contract."
+        },
+        {
+          "name": "SENSITIVITY_CHECKED",
+          "requires": [
+            "speedup_ratio",
+            "alternative_workload_tried"
+          ],
+          "self_graded": true,
+          "enforces": [
+            "the default build's median on the costliest input must be at least 1.05 times the -O3 build's median there",
+            "at least one further workload of a different KIND -- more computation per byte, less I/O, no startup dominance -- must have been tried and recorded"
+          ],
+          "instruction": "Ensure the default build's median runtime is at least 1.05 times the optimized build's median. If you had to try multiple workloads to find one with this sensitivity, record what was tried in alternative_workload_tried."
+        }
+      ],
+      "terminal": "SENSITIVITY_CHECKED"
+    },
+    "problems": [],
+    "rounds_used": 2
+  }
+}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}recipe{% endblock %}
+{% block content %}
+<h1>Recipe {{ title }}</h1>
+<p class="sub">{{ badge('delivered') if rec.delivered else badge('in progress') }}
+  The files below are {{ 'the delivered instance' if rec.delivered else "the agent's latest submission" }}.
+  <span class="muted small" title="recipe directory">recipes/{{ slug }}</span></p>
+
+<h2>Files</h2>
+{% if rec.files %}<ul class="files">{% for f in rec.files %}<li><a href="{{ base }}/file/{{ f }}" target="_blank">{{ f }}</a></li>{% endfor %}</ul>
+{% else %}<p class="empty">No files submitted yet.</p>{% endif %}
+
+<h2>Replay reports</h2>
+<p class="muted">Each time the agent asked for a check, the framework replayed its files in a fresh container. Oldest first.
+  A row marked “newly failing” or “now passes” changed since that row was last checked.</p>
+{% for c in rec.checks %}
+<details id="chk-{{ loop.index }}" {% if loop.last %}open{% endif %}>
+  <summary>{{ c.file }} · {{ badge('ok' if c.ok else 'bad') }} · {{ c.ts|when }}{% if c.elapsed %} · {{ c.elapsed|dur }}{% endif %}{% if c.changed %} · <span class="badge info">{{ c.changed }} changed</span>{% endif %}</summary>
+  <table><thead><tr><th>row</th><th>result</th><th>since last time</th><th>detail</th></tr></thead><tbody>
+  {% for row in c.rows %}
+    <tr><td><code>{{ row.name }}</code></td><td>{{ badge('ok' if row.ok else 'bad') }}{% if row.hard %} <span class="badge warn">hard</span>{% endif %}</td>
+      <td class="nowrap">{% if row.change == 'newly failing' %}<span class="badge bad">newly failing</span>{% elif row.change %}<span class="badge ok">now passes</span>{% endif %}</td>
+      <td class="wrap">{% if row.detail and row.detail|length > 300 %}<details class="inline" id="d-{{ loop.index }}-{{ c.file }}"><summary>{{ row.detail|truncate(220) }}</summary><pre>{{ row.detail }}</pre></details>{% else %}<pre>{{ row.detail or '' }}</pre>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody></table>
+</details>
+{% else %}<p class="empty">No check yet.</p>{% endfor %}
+{% endblock %}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}BenchMeUp{% endblock %} · BenchMeUp</title>
+<script>
+  // The theme chosen in this browser (auto follows the system), set before the page paints.
+  try { var t = localStorage.getItem("bm-theme"); if (t && t !== "auto") document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<link rel="stylesheet" href="/static/ui.css">
+</head>
+<body data-refresh="{{ refresh }}">
+<header class="top">
+  <a class="brand" href="/">BenchMeUp</a>
+  <nav>
+    <a href="/">Overview</a>
+    <a href="/workflow">Workflow</a>
+    {% if not static_export %}<a href="/running">Running now</a>{% endif %}
+    <a href="/benchmarks">Benchmarks</a>
+    <a href="/compare">Compare</a>
+    {% if not static_export %}<a href="/jobs">Actions log</a>{% endif %}
+  </nav>
+  <div class="top-right">
+  {% if not static_export %}<form class="find" method="get" action="/candidate"><input type="search" name="q" placeholder="find a candidate: owner/repo @ commit" aria-label="find a candidate"></form>{% endif %}
+  {% if refresh %}
+  <label class="live-toggle" title="Reload the live parts of this page every {{ refresh }} s">
+    <input type="checkbox" id="live" checked> live <span id="live-age"></span>
+  </label>
+  {% endif %}
+  <label class="theme-pick" title="Colour theme (remembered in this browser)">theme
+    <select id="theme">
+      <option value="auto">auto</option>
+      <option value="light">light</option>
+      <option value="dark">dark</option>
+      <option value="colorful">colorful</option>
+    </select>
+  </label>
+  </div>
+</header>
+{% set hw = [] if static_export else health() %}{% set serious = hw|rejectattr('level', 'equalto', 'info')|list %}
+{% if serious %}
+<a class="health-strip {{ 'bad' if serious|selectattr('level', 'equalto', 'bad')|list else 'warn' }}" href="/health">
+  <b>{{ serious|length }} warning{{ '' if serious|length == 1 else 's' }}</b>
+  {% for w in serious[:3] %}<span>· {{ w.kind }}: {{ w.where }} — {{ w.what|truncate(90) }}</span>{% endfor %}
+  {% if serious|length > 3 %}<span>· …</span>{% endif %}
+</a>
+{% endif %}
+<div class="crumbs">
+  <a href="/">Overview</a>
+  {% for label, url in crumbs %}
+    <span class="sep">›</span>
+    {% if url %}<a href="{{ url }}">{{ label }}</a>{% else %}<span>{{ label }}</span>{% endif %}
+  {% endfor %}
+</div>
+<main>
+{% block content %}{% endblock %}
+</main>
+<footer>
+  {% if static_export %}A static copy of the BenchMeUp UI: read-only, no live parts.{% else %}repository <code>{{ tree.root }}</code> · runs <code>{{ tree.runs }}</code> · {{ 'actions on' if actions_on else 'read-only' }}{% endif %}
+</footer>
+<script src="/static/ui.js"></script>
+</body>
+</html>

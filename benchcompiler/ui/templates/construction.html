@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, budget, tabbar %}
+{% block title %}{{ r.label }}{% endblock %}
+{% block content %}
+{% set models = r.workers|map(attribute='model')|select|unique|list %}
+<h1>{{ task }} · construction {{ r.label.split('/')[-1] if r.label.startswith('construct/') else r.label }}
+  {% if r.workers|selectattr('alive')|list %} <a class="btn-link" href="/stop?kind=construction&name={{ r.key }}">Stop…</a>{% endif %}</h1>
+<div class="live" id="run-head">
+<div class="stats">
+  <div class="stat"><div class="v">{{ r.workers|length }}</div><div class="k">agents{% set n = r.workers|selectattr('alive')|list|length %}{% if n %} · {{ n }} running{% endif %}</div></div>
+  <div class="stat"><div class="v">{{ r.delivered|length }}</div><div class="k">delivered{% if r.handover.total_target %} of target {{ r.handover.total_target }}{% endif %}</div></div>
+  <div class="stat"><div class="v">{{ r.dropped|length }}</div><div class="k">dropped</div></div>
+  <div class="stat"><div class="v">{{ r.workers|map(attribute='cost')|select|sum|money }}</div><div class="k">spent</div></div>
+  {% if r.handover.candidates %}<div class="stat"><div class="v">{{ r.handover.candidates }}</div><div class="k">candidates handed over</div></div>{% endif %}
+  <div class="stat"><div class="v small-v">{{ models|map('model')|join(', ') or '-' }}</div><div class="k">model</div></div>
+</div>
+</div>
+
+{{ tabbar([('graph', 'Graph', none), ('agents', 'Agents', r.workers|length), ('delivered', 'Delivered', r.delivered|length),
+           ('dropped', 'Dropped', r.dropped|length), ('lessons', 'Lessons', none), ('settings', 'Settings', none)], tab) }}
+
+{% if tab == 'graph' %}
+<p class="legend small">Each worker and the candidates it took, in order. <span class="chip k-delivered">delivered</span>
+  <span class="chip k-dropped">dropped</span> <span class="chip k-now">being built</span> <span class="chip k-open">left unfinished</span>
+  Click a candidate for its whole history.</p>
+<div class="live" id="run-graph">
+<div class="jg">
+  <div class="jg-src">
+    <div class="node p3"><div class="node-k">hand-over</div>
+      <div class="node-v">{{ r.handover.candidates or graph.workers|map(attribute='pool')|select|sum or '-' }}</div>
+      <div class="node-s">candidates{% if r.handover.order %} · {{ r.handover.order }} order{% endif %}</div>
+      <div class="node-s">{{ graph.workers|length }} workers</div></div>
+  </div>
+  <div class="jg-rows">
+  {% for w in graph.workers %}
+  <div class="jg-row">
+    <a class="jg-worker st-{{ 'running' if w.alive else 'done' }}" href="/construction/{{ r.key }}/{{ w.name }}">
+      <div class="pn-head">{{ w.name }}<span class="dot {{ 'running' if w.alive else 'done' }}"></span></div>
+      <div class="pn-s">{{ w.state }} · cycle {{ w.cycle or '-' }}</div>
+      <div class="pn-s">{{ w.cost|money }} / {{ w.cost_limit|money }} · {{ w.wall|dur }} / {{ w.wall_limit|dur }}</div>
+    </a>
+    <div class="jg-chips">
+    {% for i in w['items'] %}
+      <a class="chip k-{{ i.kind }}" href="/candidate?q={{ i.key|urlencode }}"
+         title="{{ i.key }} · {{ i.state }}{% if i.reason %} · {{ i.reason|truncate(300) }}{% endif %}">{{ i.key|key }} <small>{{ labels(i) }}</small></a>
+    {% else %}<span class="muted small">nothing taken yet</span>{% endfor %}
+    </div>
+    <div class="jg-out"><b>{{ w.n_delivered }}</b> delivered<br><span class="muted">{{ w.n_dropped }} dropped</span></div>
+  </div>
+  {% endfor %}
+  </div>
+  <div class="jg-sink">
+    <div class="node p4"><div class="node-k">delivered</div><div class="node-v">{{ r.delivered|length }}</div>
+      <div class="node-s">{{ r.dropped|length }} dropped</div></div>
+  </div>
+</div>
+</div>
+
+{% elif tab == 'agents' %}
+<div class="live" id="run-workers">
+<table class="dense">
+  <thead><tr><th>agent</th><th>state</th><th class="num">cycle</th><th>cost</th><th>wall clock</th>
+    <th>working on</th><th class="num">delivered</th><th class="num">dropped</th><th class="num">taken</th><th>last activity</th></tr></thead>
+  <tbody>
+  {% for w in r.workers %}
+  <tr>
+    <td class="nowrap"><a href="/construction/{{ r.key }}/{{ w.name }}">{{ w.name }}</a></td>
+    <td>{{ badge(w.state) }}</td>
+    <td class="num">{{ w.cycle or '-' }}</td>
+    <td class="w-budget">{{ budget(w.cost, w.cost_limit, 'money') }}</td>
+    <td class="w-budget">{{ budget(w.wall, w.wall_limit, 'dur') }}</td>
+    <td class="nowrap">{% if w.current and w.alive %}<span title="{{ w.current.key }}">{{ w.current.key|key }}</span> <span class="badge running">{{ w.current.state|state }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>
+    <td class="num">{{ w.n_delivered }}</td><td class="num">{{ w.n_dropped }}</td>
+    <td class="num">{{ w.registered }}{% if w.pool %}<span class="muted"> / {{ w.pool }}</span>{% endif %}</td>
+    <td class="muted nowrap">{{ w.last_activity|ago }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% elif tab == 'delivered' %}
+{% if r.delivered %}
+<table class="dense narrow"><thead><tr><th>candidate</th><th>agent</th></tr></thead><tbody>
+{% for d in r.delivered %}<tr><td title="{{ d.key }}">{{ d.key|key }}</td><td><a href="/construction/{{ r.key }}/{{ d.worker }}">{{ d.worker }}</a></td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="empty">Nothing delivered yet.</p>{% endif %}
+
+{% elif tab == 'dropped' %}
+{% if r.dropped %}
+<table class="dense"><thead><tr><th>candidate</th><th>agent</th><th>the agent's reason</th></tr></thead><tbody>
+{% for d in r.dropped %}<tr><td class="nowrap" title="{{ d.key }}">{{ d.key|key }}</td><td><a href="/construction/{{ r.key }}/{{ d.worker }}">{{ d.worker }}</a></td>
+  <td class="small">{% if d.reason and d.reason|length > 240 %}<details class="inline" id="drop-{{ loop.index }}"><summary>{{ d.reason|truncate(220) }}</summary><div class="prose">{{ d.reason }}</div></details>{% else %}{{ d.reason or '-' }}{% endif %}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="empty">Nothing dropped.</p>{% endif %}
+
+{% elif tab == 'lessons' %}
+{% if r.lessons %}<p class="muted">What a model distilled from all the agents' records; every agent reads it each cycle.</p>
+<div class="prose">{{ r.lessons }}</div>{% else %}<p class="empty">No lessons were shared in this run.</p>{% endif %}
+
+{% elif tab == 'settings' %}
+{% if r.handover %}<div class="kv">{% for k, v in r.handover.items() %}<div class="k">{{ k|replace('_', ' ') }}</div><div class="v">{% if k == 'ts' %}{{ v|when }}{% else %}<code>{{ v }}</code>{% endif %}</div>{% endfor %}</div>{% endif %}
+{% if r.arms %}<h2>How the agents were launched</h2><pre>{{ r.arms|tojson_pretty }}</pre>{% endif %}
+{% endif %}
+{% endblock %}

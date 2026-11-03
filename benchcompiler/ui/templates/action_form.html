@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ a.label }}{% endblock %}
+{% block content %}
+<h1>{{ a.label }} · {{ task }}</h1>
+<p class="sub">{{ a.doc }}</p>
+{% if not allow %}<div class="note">Actions are off (read-only UI). The form shows the settings; start bench-ui with <code>--allow-actions</code> to run it.</div>{% endif %}
+{% if error %}<div class="note bad-note"><b>Not run:</b> {{ error }}</div>{% endif %}
+<form method="post" action="/action/{{ a.id }}/{{ task }}/check" class="aform">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% for f in a.fields %}
+  {% set cur = form.get(f.name, f.value) %}
+  <label class="af-row">
+    <span class="af-label">{{ f.label }}{% if f.required %} <b class="req">*</b>{% endif %}</span>
+    <span class="af-input">
+    {% if f.kind == 'choice' %}
+      <select name="{{ f.name }}"><option value="">{{ '- choose -' if f.required else '(script default)' }}</option>
+        {% for c in f.choices %}<option {{ 'selected' if cur == c }}>{{ c }}</option>{% endfor %}</select>
+    {% elif f.kind == 'multi' %}
+      <span class="af-multi">{% for c in f.choices %}<label><input type="checkbox" name="{{ f.name }}" value="{{ c }}"
+        {{ 'checked' if (cur is string and cur == c) or (cur is not string and c in (cur or [])) }}> {{ c|replace('~', '/') }}</label>{% else %}<span class="muted">nothing to choose</span>{% endfor %}</span>
+    {% else %}
+      <input name="{{ f.name }}" value="{{ cur or '' }}" placeholder="{{ f.placeholder }}"
+        {% if f.kind in ('int', 'float') %}inputmode="decimal"{% endif %}>
+    {% endif %}
+    {% if f.help %}<span class="af-help">{{ f.help }}</span>{% endif %}
+    </span>
+  </label>
+  {% endfor %}
+  <div class="af-actions"><button type="submit" {{ 'disabled' if not allow }}>Check</button>
+    <span class="muted small">Runs {{ 'the dry run' if a.check else 'a preview' }}; nothing {{ 'is launched' if a.check else 'is written' }} yet.</span></div>
+</form>
+{% endblock %}

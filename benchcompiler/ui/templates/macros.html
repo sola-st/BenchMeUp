@@ -1,0 +1,84 @@
+{% macro badge(state) -%}
+<span class="badge {{ state|lower|replace(' ', '-') }}">{{ state }}</span>
+{%- endmacro %}
+
+{# One line: "$0.28 / $5" or "2h14 / 6h", with a thin bar under it. #}
+{% macro budget(v, limit, fmt) -%}
+{% if v is not none -%}
+<div class="budget"><span>{{ v|money if fmt == 'money' else v|dur }}</span>{% if limit %}<span class="muted"> / {{ limit|money if fmt == 'money' else limit|dur }}</span>{% endif %}</div>
+{% if limit %}<div class="bar {{ 'hot' if pct(v, limit) >= 90 }}"><span style="width: {{ pct(v, limit) }}%"></span></div>{% endif %}
+{%- else %}<span class="muted">-</span>{% endif %}
+{%- endmacro %}
+
+{# A tab bar: tabs is a list of (id, label, count-or-none); each tab is its own URL (?tab=id). #}
+{% macro tabbar(tabs, active) -%}
+<nav class="tabs">
+{% for id, label, n in tabs %}<a href="?tab={{ id }}" class="{{ 'on' if id == active }}">{{ label }}{% if n is not none %} <span class="count">{{ n }}</span>{% endif %}</a>{% endfor %}
+</nav>
+{%- endmacro %}
+
+{# The agents running now, one card per run (a search campaign or a construction run). #}
+{% macro run_cards(groups) -%}
+<div class="live" id="run-cards">
+{% for g in groups %}
+<a class="runcard" href="{{ g.url }}">
+  <div class="rc-head"><span class="badge running">{{ g.n }} running</span> <b>{{ g.task }}</b> <span class="muted">{{ g.label }}</span></div>
+  <div class="rc-body">
+    <span>{{ g.kind }}</span>
+    <span>{{ g.cost|money }} spent</span>
+    {% if g.kind == 'search' %}<span>{{ g.candidates }} candidates</span>
+    {% else %}<span>{{ g.delivered }} delivered · {{ g.dropped }} dropped</span>{% endif %}
+    <span class="muted">{{ g.model|model }}</span>
+  </div>
+</a>
+{% else %}
+<p class="empty">No agent is running.</p>
+{% endfor %}
+</div>
+{%- endmacro %}
+
+{# The construction stages of a funnel (data.stage_funnel) as connected boxes. #}
+{% macro stage_boxes(f, detail=false) -%}
+{% for s in f.stages %}
+<div class="node p3 stage{{ ' wide' if detail }}">
+  <div class="node-k">stage {{ s.n }}{% if s.now %} <span class="badge running">{{ s.now }} now</span>{% endif %}</div>
+  {% if detail and s.name %}<div class="node-name">{{ s.name }}</div>{% endif %}
+  <div class="node-v">{{ s.passed }}<span class="muted"> / {{ s.entered }}</span></div>
+  <div class="node-s">passed / entered</div>
+  {% if s.entered %}<div class="split-bar" title="passed {{ s.passed }} · dropped {{ s.dropped }} · open {{ s.open }}">
+    <span class="sb-pass" style="width: {{ pct(s.passed, s.entered) }}%"></span><span class="sb-drop" style="width: {{ pct(s.dropped, s.entered) }}%"></span><span class="sb-open" style="width: {{ pct(s.open, s.entered) }}%"></span></div>{% endif %}
+  <div class="node-s">{% if s.dropped %}<span class="t-drop">{{ s.dropped }} dropped</span>{% endif %}{% if s.dropped and s.open %} · {% endif %}{% if s.open %}<span class="t-open">{{ s.open }} unfinished</span>{% endif %}</div>
+  {% if detail %}
+    {% if s.files %}<div class="node-s">writes {% for x in s.files %}<code>{{ x }}</code> {% endfor %}</div>{% endif %}
+    {% if s.rows %}<div class="node-s">checked by {% for x in s.rows %}<code>{{ x }}</code> {% endfor %}</div>{% endif %}
+  {% endif %}
+</div>
+<div class="arrow">→</div>
+{% endfor %}
+{%- endmacro %}
+
+{# One construction model's path for a task: taken, its stages, delivered, packaged (app._builds). #}
+{% macro build_row(task, g, detail=false) -%}
+<div class="flow{{ ' big' if detail }}">
+  <a class="node p3" href="/task/{{ task }}?tab=construction">
+    <div class="node-k"><span class="n">3</span> construction{% if g.funnel.now %} <span class="badge running">{{ g.funnel.now }} now</span>{% endif %}</div>
+    <div class="node-name" title="{{ g.model }}">{{ g.model }}</div>
+    <div class="node-v">{{ g.funnel.taken }}</div>
+    <div class="node-s">taken by {{ g.funnel.workers }} workers in {{ g.runs|length }} run{{ '' if g.runs|length == 1 else 's' }}</div>
+  </a>
+  <div class="arrow">→</div>
+  {{ stage_boxes(g.funnel, detail) }}
+  <a class="node p3" href="/task/{{ task }}?tab=construction">
+    <div class="node-k">delivered</div>
+    <div class="node-v">{{ g.funnel.delivered }}</div>
+    <div class="node-s">{{ pct(g.funnel.delivered, g.funnel.taken) }}% of taken{% if g.funnel.distinct != g.funnel.delivered %} · {{ g.funnel.distinct }} distinct (some built twice){% endif %}</div>
+  </a>
+  <div class="arrow">→</div>
+  <a class="node p4" href="/task/{{ task }}?tab=benchmarks">
+    <div class="node-k"><span class="n">4</span> packaged</div>
+    {% if g.benchmarks %}<div class="node-v">{{ g.benchmarks|sum(attribute='count') }}</div>
+      <div class="node-s">set {% for b in g.benchmarks %}{{ b.set }}{{ ', ' if not loop.last }}{% endfor %}</div>
+    {% else %}<div class="node-v muted">0</div><div class="node-s">not packaged yet</div>{% endif %}
+  </a>
+</div>
+{%- endmacro %}

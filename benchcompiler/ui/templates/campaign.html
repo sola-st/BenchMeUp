@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, budget, tabbar %}
+{% block title %}{{ c.task }} · {{ c.epoch }}{% endblock %}
+{% block content %}
+{% set models = c.agents|map(attribute='model')|select|unique|list %}
+<h1>{{ c.task }} · search {{ c.epoch }}
+  {% if c.agents|selectattr('alive')|list %} <a class="btn-link" href="/stop?kind=search&task={{ c.task }}&name={{ c.epoch }}">Stop…</a>{% endif %}</h1>
+<div class="live" id="campaign-head">
+<div class="stats">
+  <div class="stat"><div class="v">{{ c.agents|length }}</div><div class="k">agents{% set r = c.agents|selectattr('alive')|list|length %}{% if r %} · {{ r }} running{% endif %}</div></div>
+  <div class="stat"><div class="v">{{ c.agents|map(attribute='cost')|select|sum|money }}</div><div class="k">spent</div></div>
+  <div class="stat"><div class="v">{{ c.agents|sum(attribute='candidates') }}</div><div class="k">candidates (stock files, before freezing)</div></div>
+  <div class="stat"><div class="v small-v">{{ models|map('model')|join(', ') or '-' }}</div><div class="k">model</div></div>
+</div>
+</div>
+{% for m, text in c.markers.items() %}<div class="note"><b>{{ m|lower }}:</b> {{ text|truncate(300) }}</div>{% endfor %}
+
+{{ tabbar([('graph', 'Graph', none), ('agents', 'Agents', c.agents|length), ('directions', 'Search directions', none),
+           ('candidates', 'Candidates', c.agents|sum(attribute='candidates')), ('settings', 'Settings and timeline', none)], tab) }}
+
+{% if tab == 'graph' %}
+<div class="live" id="campaign-graph">
+<div class="jg">
+  <div class="jg-src">
+    <a class="node p2" href="?tab=directions"><div class="node-k">brief{{ ' + directions' if c.directions }}</div>
+      <div class="node-v">{{ c.agents|length }}</div><div class="node-s">agents launched</div></a>
+  </div>
+  <div class="jg-rows">
+  {% for a in graph %}
+  <div class="jg-row">
+    <a class="jg-worker st-{{ 'running' if a.alive else 'done' }}" href="/search/{{ c.task }}/{{ c.epoch }}/{{ a.name }}">
+      <div class="pn-head">{{ a.name }}<span class="dot {{ 'running' if a.alive else 'done' }}"></span></div>
+      <div class="pn-s">{{ a.state }} · cycle {{ a.cycle or '-' }}</div>
+      <div class="pn-s">{{ a.cost|money }} / {{ a.cost_limit|money }} · {{ a.wall|dur }} / {{ a.wall_limit|dur }}</div>
+    </a>
+    <div class="jg-chips jg-progress">
+      <div class="node-s">stock file: <b>{{ a.candidates }}</b>{% if a.target %} of target {{ a.target }}{% endif %}{% if a.shrinks %} · shrank {{ a.shrinks }}×{% endif %}{% if a.reason %} · {{ a.reason|truncate(120) }}{% endif %}</div>
+      {% if a.pct is not none %}<div class="bar wide-bar"><span style="width: {{ [a.pct, 100]|min }}%"></span></div>{% endif %}
+    </div>
+    <div class="jg-out"><a href="/candidates/attempt/{{ c.task }}/{{ c.epoch }}/{{ a.name }}"><b>{{ a.candidates }}</b> candidates</a></div>
+  </div>
+  {% endfor %}
+  </div>
+  <div class="jg-sink">
+    <a class="node p2" href="/task/{{ c.task }}?tab=search"><div class="node-k">freeze</div>
+      <div class="node-v">{{ c.agents|sum(attribute='candidates') }}</div>
+      <div class="node-s">in the stock files; frozen stocks of {{ c.task }}: {% for s in stocks %}{{ s.name }} {{ s.count }}{{ ', ' if not loop.last }}{% else %}none{% endfor %}</div></a>
+  </div>
+</div>
+</div>
+
+{% elif tab == 'agents' %}
+<div class="live" id="campaign-agents">
+<table class="dense">
+  <thead><tr><th>agent</th><th>state</th><th class="num">cycle</th><th>cost</th><th>wall clock</th>
+    <th class="num">candidates</th><th class="num">target</th><th class="num" title="times the stock file shrank (the harness kept a copy each time)">shrank</th><th>last activity</th><th>stopped because</th></tr></thead>
+  <tbody>
+  {% for a in c.agents %}
+  <tr>
+    <td class="nowrap"><a href="/search/{{ c.task }}/{{ c.epoch }}/{{ a.name }}">{{ a.name }}</a></td>
+    <td>{{ badge(a.state) }}</td>
+    <td class="num">{{ a.cycle or '-' }}</td>
+    <td class="w-budget">{{ budget(a.cost, a.cost_limit, 'money') }}</td>
+    <td class="w-budget">{{ budget(a.wall, a.wall_limit, 'dur') }}</td>
+    <td class="num"><a href="/search/{{ c.task }}/{{ c.epoch }}/{{ a.name }}?tab=stock">{{ a.candidates }}</a></td>
+    <td class="num">{{ a.target or '-' }}</td>
+    <td class="num">{{ a.shrinks or '' }}</td>
+    <td class="muted nowrap">{{ a.last_activity|ago }}</td>
+    <td class="muted small">{{ a.reason or '' }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% elif tab == 'directions' %}
+{% if c.directions %}
+<p class="muted">A model summarizes where each agent searches (queries, filters, repositories); every agent is shown
+the others' directions and told to search elsewhere.</p>
+<div class="prose live" id="campaign-directions">{{ c.directions }}</div>
+{% else %}<p class="empty">This campaign shared no search directions.</p>{% endif %}
+
+{% elif tab == 'candidates' %}
+{% include "cand_table.html" %}
+
+{% elif tab == 'settings' %}
+{% if c.settings %}
+<div class="kv">
+{% for k, v in c.settings.items() if v is not none %}<div class="k">{{ k|replace('_', ' ') }}</div><div class="v">{% if k in ('started', 'ended') %}{{ v|when }}{% else %}<code>{{ v if v is string else v|tojson }}</code>{% endif %}</div>{% endfor %}
+</div>
+{% else %}<p class="empty">No campaign settings recorded (launched without search_campaign.py).</p>{% endif %}
+{% if c.events %}
+<h2>Timeline</h2>
+<table class="dense narrow"><thead><tr><th class="num">after</th><th>event</th></tr></thead><tbody>
+{% for t, what in c.events %}<tr><td class="num">{{ t|dur }}</td><td>{{ what }}</td></tr>{% endfor %}
+</tbody></table>
+{% endif %}
+{% if c.log_tail %}<details><summary>Campaign log (end)</summary><pre>{{ c.log_tail }}</pre></details>{% endif %}
+{% endif %}
+{% endblock %}

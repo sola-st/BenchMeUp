@@ -1,0 +1,23 @@
+{# A filterable table of candidate records. Expects `rows`. #}
+{% set long = ['evidence', 'judgment', 'notes', 'build_instructions_quote', 'computation_quote', 'found_by'] %}
+{% set cols = [] %}
+{% for r in rows[:50] %}{% for k in r.keys() %}{% if k not in cols and k not in long and not k.startswith('head_sha_as') %}{% set _ = cols.append(k) %}{% endif %}{% endfor %}{% endfor %}
+<div class="toolbar"><input type="search" placeholder="filter: repository, commit, words in the evidence…" data-filter="cands">
+  <span class="muted" id="cands-count">{{ rows|length }} candidates</span></div>
+<div class="scroll"><table id="cands" class="dense">
+  <thead><tr><th class="num">#</th>{% for k in cols %}<th>{{ k|replace('_', ' ')|replace('agent', 'agent') }}</th>{% endfor %}<th>evidence</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td class="num muted">{{ loop.index }}</td>
+    {% for k in cols %}{% set v = r.get(k) %}
+      <td class="{{ 'mono' if v is string and v|length >= 20 and ' ' not in v }}">{% if v is string and v.startswith('https://github.com/') %}<a href="{{ v }}" target="_blank" rel="noopener">{{ v|replace('https://github.com/', '')|replace('.git', '') }}</a>{% elif v is string and v|length == 40 and ' ' not in v %}<span title="{{ v }}">{{ v[:10] }}</span>{% elif v is string %}{{ v|truncate(120) }}{% elif v is none %}<span class="muted">-</span>{% else %}<code>{{ (v|tojson)|truncate(120) }}</code>{% endif %}</td>
+    {% endfor %}
+    <td>{% set ev = [] %}{% for k in long if r.get(k) %}{% set _ = ev.append(k) %}{% endfor %}
+      {% if ev %}<details class="inline" id="ev-{{ loop.index }}"><summary>{{ ev|join(', ')|replace('_', ' ') }}</summary>
+        {% for k in ev %}<div class="msg"><div class="role">{{ k|replace('_', ' ') }}</div><div class="thought">{{ r[k] if r[k] is string else r[k]|tojson_pretty }}</div></div>{% endfor %}
+      </details>{% else %}<span class="muted">-</span>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="9" class="empty">No candidates.</td></tr>{% endfor %}
+  </tbody>
+</table></div>

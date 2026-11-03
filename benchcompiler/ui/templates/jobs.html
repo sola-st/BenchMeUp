@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Actions log{% endblock %}
+{% block content %}
+<h1>Actions log</h1>
+<p class="sub">Every check, run and stop started from this UI ({{ 'actions on' if allow else 'actions off: read-only' }}).</p>
+<div class="live" id="jobs">
+<table class="dense"><thead><tr><th>started</th><th>task</th><th>action</th><th>kind</th><th>result</th><th>command</th></tr></thead><tbody>
+{% for j in jobs %}<tr>
+  <td class="nowrap muted">{{ j.started|when }}</td><td>{{ j.task or '-' }}</td>
+  <td><a href="/jobs/{{ j.id }}">{{ j.action }}</a></td><td>{{ j.kind }}</td>
+  <td>{% if j.running %}{{ badge('running') }}{% elif j.exit == 0 %}{{ badge('ok') }}{% elif j.exit is none %}{{ badge('ended') }}{% else %}{{ badge('failed') }} {{ j.exit }}{% endif %}</td>
+  <td class="small"><code>{{ (j.argv or [])|cmdline|truncate(110) }}</code></td></tr>
+{% else %}<tr><td colspan="6" class="empty">Nothing yet.</td></tr>{% endfor %}
+</tbody></table>
+</div>
+{% endblock %}

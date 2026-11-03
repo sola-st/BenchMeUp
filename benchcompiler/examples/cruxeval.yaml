@@ -1,0 +1,95 @@
+# Real paper: CRUXEval -- A Benchmark for Code Reasoning, Understanding and
+# Execution (MIT/Meta AI;
+# reported as ICML 2024 per external listings -- not explicitly printed in
+# this arXiv PDF version, flagged honestly; arXiv:2401.03065). Reverse-
+# engineered from the actual PDF's Section 3 "Benchmark Construction".
+
+task: |
+  Two execution-reasoning tasks over short Python functions: (1) output
+  prediction -- given a function and an input, predict the output of
+  executing it; (2) input prediction -- given a function and an output,
+  find any input that produces that output when the function is executed.
+
+instance: |
+  input: a Python function (3-13 lines) plus either a concrete input
+  (output-prediction task) or a target output (input-prediction task)
+  expected output: for output-prediction, the value the function produces
+  on that input; for input-prediction, any input value whose execution
+  produces the given output
+
+data: |
+  Not mined from real repositories -- fully synthetic generation. Code
+  Llama 34B is prompted with the name of a Python standard-library function
+  (69 total: 47 from str, 11 from dict, 11 from list) plus two few-shot
+  examples, and asked to generate a Python function using that library
+  function, along with 5 test inputs. Candidate = one generated
+  (function, input, output) triple where executing the function on the
+  input deterministically produces the output.
+
+admissibility: |
+  not applicable: nothing is mined. Instances are generated synthetically by prompting a
+  model with standard-library function names, as `data` above states, so there are no
+  sources to bound.
+
+correctness: |
+  execution-replay (purely automated, zero human judgment): for output
+  prediction, a submitted output is correct iff `f(input) == submitted_output`
+  when actually executed; for input prediction, a submitted input is correct
+  iff `f(submitted_input) == output` when actually executed. No partial
+  credit, no human review at any point -- ground truth is established by
+  running the generated function itself at construction time, and graded
+  the same way at evaluation time.
+
+interface: |
+  DELEGATE: the source paper's exact release format (file schema, hosting)
+  was not confirmed in our extraction pass. Propose a standard, minimal
+  interface: a JSONL file with one record per instance {function_source,
+  input, output, task: "input"|"output"}, plus a local CLI `bench eval
+  <task> <instance_id> <submission>` that executes the actual function and
+  checks the corresponding assertion. Record this as a delegated choice.
+
+scale: |
+  800 final functions (each yielding one output-prediction instance and one
+  input-prediction instance); generated from a pool of 102,000 candidate
+  functions and 489,306 input-output pairs, filtered down to ~1,700 passing
+  candidates, then sized to 800 via bootstrap analysis (the smallest N at
+  which known model-performance orderings, e.g. Code Llama 34B > 13B,
+  remained statistically distinguishable at N=800: ~1.5% sampling noise per
+  model, ~0.2% generation-temperature noise). Human budget: 0h.
+
+criteria: |
+  Verbatim from the paper's Section 3.2 (quoted, not paraphrased, to remove
+  transcription ambiguity):
+  - Compile time: "all arguments of the function must be used in the
+    function, length of code is between 75 and 300 characters, no syntax
+    errors, proper assertion assert f(input) == output."
+  - Runtime: "no float point operations, true division, exp, other integer
+    operations must have at least one argument <= 3, string and list
+    operations must have at least one argument with length <= 3, finish
+    running in 2 seconds, no uncaught exceptions." (I.e. the <=3 bound
+    applies to at least one operand of each qualifying runtime integer/
+    string/list operation, checked dynamically during the 2-second
+    execution -- not to source-code literals statically.)
+  - Other: "function cannot have any imports (such as os, random), must be
+    deterministic (random, set ordering), and cannot have side effects such
+    as input, builtins." No separate human-solvability rule beyond these
+    mechanical filters -- the paper's "solveable by a human without extra
+    memory" framing is the *motivation* for the filters above, not an
+    additional independently-checked criterion.
+
+quality: |
+  - noise measurement via bootstrap resampling at multiple candidate dataset
+    sizes (200/400/800/1600) to justify that 800 is sufficient to preserve
+    statistically significant pairwise model comparisons (alpha=0.05)
+  - filtering is entirely rule-based and deterministic (no manual review
+    of individual instances described)
+
+examples: |
+  - known-valid: any retained function meeting all compile-time and runtime
+    filters, with a verified deterministic (input, output) pair
+  - known-invalid: a candidate using a float operation, containing an
+    import, exceeding 300 characters, or not finishing within 2 seconds
+
+constraints: |
+  - Python only; functions limited to standard-library str/dict/list usage
+  - deliberately excludes floating-point and heavy-arithmetic reasoning by design

@@ -1,0 +1,277 @@
+{
+ "contract": {
+  "artifact_variants": [
+   {
+    "name": "buggy",
+    "description": "the project checked out and built at the buggy revision (the fix commit's parent), with the fix commit's own added/modified triggering test(s) applied to it. The check runs the triggering test(s) and passes only if they FAIL here -- the bug is observable",
+    "check_cmd": "sh check_buggy.sh .",
+    "expect": "pass",
+    "results": "junit-xml",
+    "expect_failures": 1
+   },
+   {
+    "name": "fixed",
+    "description": "the project checked out and built at the fixed revision (the fix commit itself). The check runs the same triggering test(s) and passes only if they PASS here, and the project's other previously-passing tests still pass -- fail-to-pass plus no-regression",
+    "check_cmd": "sh check_fixed.sh .",
+    "expect": "pass",
+    "results": "junit-xml",
+    "expect_failures": 0
+   }
+  ],
+  "measure": null,
+  "observables": [],
+  "parameters": []
+ },
+ "problems": [],
+ "rounds_used": 1,
+ "obligations": [],
+ "lifecycle": {
+  "design": {
+   "consumer_session": [
+    {
+     "command": "list",
+     "expect": "List of instances with IDs and project names."
+    },
+    {
+     "command": "info 1",
+     "expect": "Instance 1: project=MyProject, buggy=abc123, fixed=def456, triggering tests=[TestFoo]"
+    },
+    {
+     "command": "start 1",
+     "expect": "Sandbox created at /tmp/sandbox/1. Instance ready for repair."
+    },
+    {
+     "command": "exec 1 -- git apply mypatch.diff",
+     "expect": "Patch applied successfully."
+    },
+    {
+     "command": "exec 1 -- mvn test -Dtest=TestFoo",
+     "expect": "Tests run: 1, Failures: 0, Errors: 0"
+    },
+    {
+     "command": "check-buggy 1",
+     "expect": "Buggy check: build succeeds, triggering test fails. Exit code 0."
+    },
+    {
+     "command": "check-fixed 1",
+     "expect": "Fixed check: build succeeds, triggering test passes. Exit code 0."
+    },
+    {
+     "command": "stop 1",
+     "expect": "Instance stopped. Sandbox cleaned up."
+    }
+   ],
+   "key": [
+    "project_id",
+    "buggy_revision",
+    "fixed_revision",
+    "triggering_test_ids"
+   ],
+   "normalize": {
+    "project_id": "none",
+    "buggy_revision": "none",
+    "fixed_revision": "none",
+    "triggering_test_ids": "none"
+   },
+   "states": [
+    {
+     "name": "REGISTERED",
+     "requires": [
+      "sandbox",
+      "project_id",
+      "buggy_revision",
+      "fixed_revision",
+      "triggering_test_ids"
+     ],
+     "self_graded": true,
+     "instruction": "Create a sandbox directory for this instance. Record the project ID, buggy revision hash, fixed revision hash, and triggering test IDs from the CSV row. No further action."
+    },
+    {
+     "name": "EXCLUDED_CHECKED",
+     "requires": [
+      "sandbox",
+      "project_id"
+     ],
+     "self_graded": true,
+     "enforces": "not one of the excluded projects",
+     "instruction": "Verify that the project ID is not in the list of excluded Defects4J projects: Chart, Cli, Closure, Codec, Collections, Compress, Csv, Gson, JacksonCore, JacksonDatabind, JacksonXml, Jsoup, JxPath, Lang, Math, Mockito, Time. Record a boolean field 'excluded_check' as true if passed."
+    },
+    {
+     "name": "ADMITTED",
+     "requires": [
+      "sandbox",
+      "project_id",
+      "build_tool"
+     ],
+     "self_graded": true,
+     "enforces": "Project admissibility filters",
+     "instruction": "Check that the project is a Java project (has .java files) and has a recognized build tool (e.g., Maven pom.xml or Gradle build.gradle). Record the build tool name in 'build_tool'. Also ensure the project is not a duplicate of an existing Defects4J instance."
+    },
+    {
+     "name": "CLONED",
+     "requires": [
+      "sandbox",
+      "project_id",
+      "repo_url",
+      "repo_path"
+     ],
+     "self_graded": true,
+     "instruction": "Clone the repository from the known URL for the project into the sandbox at 'repo_path'. Checkout the buggy and fixed revisions later. Record the absolute path to the cloned repository."
+    },
+    {
+     "name": "BUGGY_CHECKOUT",
+     "requires": [
+      "sandbox",
+      "repo_path",
+      "buggy_revision"
+     ],
+     "self_graded": true,
+     "instruction": "Checkout the buggy revision (the fix commit's parent) in the repository. Record the actual commit hash in 'buggy_commit_hash'. The triggering test does NOT exist at this revision -- it is added or modified by the fix commit itself; that is the definition of these instances, never a reason to reject one."
+    },
+    {
+     "name": "BUGGY_BUILT",
+     "requires": [
+      "sandbox",
+      "repo_path",
+      "buggy_commit_hash"
+     ],
+     "self_graded": true,
+     "instruction": "Build the project using its configured build tool (e.g., mvn compile). Record 'buggy_build_success' as true if the build succeeds, otherwise false. If build fails, the instance is invalid."
+    },
+    {
+     "name": "BUGGY_TESTED",
+     "requires": [
+      "sandbox",
+      "repo_path",
+      "buggy_commit_hash",
+      "triggering_test_ids"
+     ],
+     "self_graded": true,
+     "instruction": "Extract the fix commit's test-only changes (the added/modified test files -- e.g. git diff <buggy>..<fixed> -- <test paths>, or git checkout <fixed> -- <test paths>) and apply them onto the buggy tree; the buggy revision does not contain the triggering test by definition. Then run the triggering test(s) and record 'buggy_test_result' as 'fail' ONLY if the applied test itself fails with a real test/assertion failure. A 'test not found', compilation, or harness error is NOT a failure -- record what happened and fix the application instead. The test must fail here to satisfy the criterion."
+    },
+    {
+     "name": "FIXED_CHECKOUT",
+     "requires": [
+      "sandbox",
+      "repo_path",
+      "fixed_revision"
+     ],
+     "self_graded": true,
+     "instruction": "Checkout the fixed revision (the fix commit) in the repository. Record the actual commit hash in 'fixed_commit_hash'."
+    },
+    {
+     "name": "FIXED_BUILT",
+     "requires": [
+      "sandbox",
+      "repo_path",
+      "fixed_commit_hash"
+     ],
+     "self_graded": true,
+     "instruction": "Build the project on the fixed revision. Record 'fixed_build_success' as true if build succeeds."
+    },
+    {
+     "name": "FIXED_TESTED",
+     "requires": [
+      "sandbox",
+      "repo_path",
+      "fixed_commit_hash",
+      "triggering_test_ids"
+     ],
+     "self_graded": true,
+     "instruction": "Run the triggering test(s) on the fixed revision. Record 'fixed_test_result' as 'pass' if all triggering tests pass, otherwise 'fail'. The test must pass."
+    },
+    {
+     "name": "TRIGGER_CONFIRMED",
+     "requires": [
+      "sandbox",
+      "buggy_test_result",
+      "fixed_test_result"
+     ],
+     "requires_true": [
+      "buggy_test_result == 'fail'",
+      "fixed_test_result == 'pass'"
+     ],
+     "self_graded": true,
+     "enforces": "triggering test which fails on the commit's parent and passes on the commit itself",
+     "instruction": "Confirm that buggy_test_result is 'fail' and fixed_test_result is 'pass'. To produce buggy_test_result: the triggering test does NOT exist at the buggy revision -- it is added or modified by the fix commit itself, which is the definition of these instances, never a reason to reject one. Extract the fix commit's test-only changes (git checkout <fixed> -- <test paths>) onto the buggy tree, run the test, and record 'fail' ONLY for a real test/assertion failure -- a 'test not found', compilation, or harness error is not a failure."
+    },
+    {
+     "name": "BUILT",
+     "requires": [
+      "sandbox",
+      "buggy_build_success",
+      "fixed_build_success"
+     ],
+     "requires_true": [
+      "buggy_build_success",
+      "fixed_build_success"
+     ],
+     "self_graded": true,
+     "enforces": "build successfully",
+     "instruction": "Confirm that both buggy and fixed revisions built successfully. Record that both build success flags are true."
+    },
+    {
+     "name": "BUGFIX_EVIDENCE",
+     "requires": [
+      "sandbox",
+      "fixed_commit_hash"
+     ],
+     "self_graded": true,
+     "enforces": "real bug-fix",
+     "instruction": "Fetch the commit message of the fixed revision. Check that it contains evidence of a bug fix (e.g., keywords like 'fix', 'bug', or references to an issue/PR). Record the commit message in 'commit_message' and set 'bug_fix_evidence' to true."
+    },
+    {
+     "name": "VARIANTS_SETUP",
+     "requires": [
+      "sandbox",
+      "repo_path",
+      "buggy_commit_hash",
+      "fixed_commit_hash",
+      "triggering_test_ids",
+      "buggy_build_success",
+      "fixed_build_success",
+      "buggy_test_result",
+      "fixed_test_result"
+     ],
+     "self_graded": true,
+     "instruction": "Create the variants directory at 'variants_root' inside the sandbox. Generate the check scripts: check_buggy.sh and check_fixed.sh. These scripts should build the respective revision and run the triggering tests, exiting with 0 if the expected outcome (buggy: build success and test failure; fixed: build success and test success) is met, and non-zero otherwise. Also create setup scripts if needed. Record the 'variants_root' path."
+    },
+    {
+     "name": "CHECK_SCRIPTS_VERIFIED",
+     "requires": [
+      "sandbox",
+      "variants_root",
+      "repo_path",
+      "buggy_commit_hash",
+      "fixed_commit_hash",
+      "buggy_check_clean",
+      "buggy_check_perturbed"
+     ],
+     "discriminates": {
+      "clean": "buggy_check_clean",
+      "perturbed": "buggy_check_perturbed",
+      "describe": "check_buggy.sh on buggy vs fixed"
+     },
+     "instruction": "Run check_buggy.sh on the buggy revision (by checking out buggy and running the script) and record the exit code as 'buggy_check_clean'. Then run check_buggy.sh on the fixed revision and record the exit code as 'buggy_check_perturbed'. The clean exit code should be 0 (success) and perturbed should be non-zero (failure). This verifies the check script discriminates correctly."
+    }
+   ],
+   "terminal": "CHECK_SCRIPTS_VERIFIED"
+  },
+  "problems": [],
+  "rounds_used": 1
+ },
+ "hand_finished": [
+  {
+   "answers": "live-run evidence r36 (stopped ~30 min in): worker_1 rejected redisson-fastremovalqueue-7285 with 'the triggering test does not exist in the buggy revision; it was added in the fix commit' -- the definitional property of every instance, because BUGGY_TESTED's instruction said 'run the triggering test on the buggy revision' without the apply-the-test-patch mechanic. Also a soundness hazard: a nonexistent test exits nonzero, so a naive agent could record a vacuous 'fail'",
+   "edit": "BUGGY_CHECKOUT instruction states the test's absence is definitional; BUGGY_TESTED instruction states the extract-and-apply mechanic and that not-found/compile/harness errors are not failures. Design re-graded CLEAN after the edit"
+  },
+  {
+   "answers": "live-run evidence r43: three candidates (netty e9873bd, jadx, redisson 3d84b14) rejected with the definitional misconception AGAIN despite the r36 hand-finish -- BUGGY_TESTED's requires are all fields recorded at earlier states, so it auto-passes and its instruction is never the next-step teaching; the demand bites at TRIGGER_CONFIRMED's requires_true",
+   "edit": "the extract-and-apply mechanic and the not-found-is-not-failure rule now also sit on TRIGGER_CONFIRMED's instruction, where buggy_test_result is demanded"
+  },
+  {
+   "answers": "live evidence 2026-08-19, d4j pool audit: 12/12 instances had a check side whose exit code proved nothing -- jadx-2854's script counted any error (gradlew: not found included) as 'bug observable', netty-21dd/jadx-2835/tomcat-dcb checks print NOTHING and exit 0, tomcat's rebuild fails on 'reference is not a tree' and still 'passed'. The contract never said what evidence a check produces, so every layer degraded to exit codes.",
+   "edit": "artifact_variants declare results: junit-xml + expect_failures (buggy 1, fixed/postfix 0; boca: results none + written reason -- digest comparison is its evidence). Check-script instruction now mandates report-producing runs, never /dev/null, errors exit 2 INCONCLUSIVE. Enforced by the undeclared_check_evidence audit (fails closed), the materialisation gate, and the certifier sweep -- all judging on parsed JUnit XML, exit codes decide nothing."
+  }
+ ]
+}

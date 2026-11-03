@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Stop{% endblock %}
+{% block content %}
+<h1>Stop {{ confirm }}</h1>
+<p class="sub">Stopping sends SIGTERM to each process group below (SIGKILL if you tick force), waits up to 20 s and checks
+  that no process of those groups is left. The run's containers are listed after; removing them is a separate step.</p>
+{% if result %}
+<div class="note {{ 'ok-note' if not result.left else 'bad-note' }}">Sent {{ result.signal }} to {{ result.groups|length }} process group(s).
+  {% if result.left %}{{ result.left|length }} process(es) still alive: {{ result.left|map(attribute='pid')|join(', ') }}. Try again with force.{% else %}No process of those groups is left.{% endif %}</div>
+{% endif %}
+<h2>Processes</h2>
+{% if t.groups %}
+<table class="dense"><thead><tr><th>what</th><th class="num">process group</th><th>processes</th></tr></thead><tbody>
+{% for g in t.groups %}<tr><td>{{ g.what }}</td><td class="num">{{ g.pgid }}</td>
+  <td class="small">{% for m in g.members[:6] %}<div><code>{{ m.pid }}</code> {{ m.cmd|truncate(120) }}</div>{% endfor %}{% if g.members|length > 6 %}<div class="muted">+ {{ g.members|length - 6 }} more</div>{% endif %}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="empty">No live process for {{ confirm }} ({{ t.agents|length }} agent folder(s) looked at).</p>{% endif %}
+<h2>Containers labelled with this run</h2>
+{% if t.containers %}
+<table class="dense"><thead><tr><th>container</th><th>agent folder</th></tr></thead><tbody>
+{% for c in t.containers %}<tr><td><code>{{ c.name }}</code></td><td class="small muted">{{ c.run }}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="empty">None running.</p>{% endif %}
+
+{% if allow %}
+  {% if t.groups %}
+  <form method="post" action="/stop" class="aform confirm">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% for k, v in q.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <p>To stop, type <code>{{ confirm }}</code>:</p>
+    <div class="af-actions"><input name="confirm" autocomplete="off" placeholder="{{ confirm }}">
+      <label class="small"><input type="checkbox" name="force" value="yes"> force (SIGKILL)</label>
+      <button type="submit" class="danger">Stop</button></div>
+  </form>
+  {% elif t.containers %}
+  <form method="post" action="/stop/containers" class="aform confirm">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% for k, v in q.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <div class="af-actions"><button type="submit" class="danger">Remove these {{ t.containers|length }} container(s)</button>
+      <span class="muted small">docker rm -f; the run's processes are gone, so nothing uses them.</span></div>
+  </form>
+  {% endif %}
+{% else %}
+<div class="note">Actions are off (read-only UI). From a shell: <code>kill -- -&lt;process group&gt;</code> for each group above.</div>
+{% endif %}
+{% endblock %}

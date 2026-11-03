@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}{{ j.action }}{% endblock %}
+{% block content %}
+<h1>{{ j.action }} · {{ j.task or '' }} · {{ j.kind }}</h1>
+<div class="live" id="job-head">
+<div class="stats">
+  <div class="stat"><div class="v">{% if j.running %}{{ badge('running') }}{% elif j.exit == 0 %}{{ badge('ok') }}{% elif j.exit is none %}{{ badge('ended') }}{% else %}{{ badge('failed') }}{% endif %}</div><div class="k">{{ 'exit ' ~ j.exit if j.exit is not none else 'state' }}</div></div>
+  <div class="stat"><div class="v small-v">{{ j.started|when }}</div><div class="k">started</div></div>
+  {% if j.pid %}<div class="stat"><div class="v small-v">{{ j.pid }}</div><div class="k">pid (own process group)</div></div>{% endif %}
+</div>
+</div>
+{% if j.argv %}<h2>Command</h2><pre class="cmdline">{{ j.argv|cmdline }}</pre>{% endif %}
+{% if j.values %}<details><summary>Settings</summary><pre>{{ j.values|tojson_pretty }}</pre></details>{% endif %}
+<h2>Output{% if j.log %} <span class="muted small">{{ j.log }}</span>{% endif %}</h2>
+<div class="live" id="job-log"><pre class="log">{{ log or '(nothing yet)' }}</pre></div>
+{% endblock %}

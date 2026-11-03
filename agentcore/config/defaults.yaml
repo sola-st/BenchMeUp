@@ -1,0 +1,23 @@
+# agentcore baseline defaults. Merged UNDER each agent's agent.yaml.
+# Most AgentSpec fields already have pydantic defaults; this file holds the
+# cross-cutting CORE constants that individual modules read directly, plus a few
+# agent-level conveniences.
+
+core:
+  truncation:
+    threshold_chars: 16000      # outputs longer than this get truncated
+    head_chars: 8000
+    middle_chars: 2000
+    tail_chars: 8000
+  structurer:
+    max_attempts: 8
+    rotate_every: 2
+  sentinels:
+    finish: "goals accomplished, end the task"
+    stage: "STAGE_COMPLETED:"
+  loop:
+    max_format_retries: 5
+
+agent:
+  action_protocol: json
+  loop: standard

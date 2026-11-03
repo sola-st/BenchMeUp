@@ -1,0 +1,98 @@
+{
+ "verbs": {
+  "noop": {
+   "args": [
+    "dir"
+   ]
+  },
+  "apply_patch": {
+   "args": [
+    "dir",
+    "patch_file"
+   ]
+  },
+  "run_tests": {
+   "args": [
+    "dir"
+   ]
+  },
+  "break": {
+   "args": [
+    "dir"
+   ]
+  }
+ },
+ "variants": {
+  "base": {
+   "setup": [
+    {
+     "verb": "noop",
+     "args": {}
+    }
+   ]
+  },
+  "gold": {
+   "setup": [
+    {
+     "verb": "apply_patch",
+     "args": {
+      "patch_file": "/bench/gold.patch"
+     }
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "run_tests",
+  "compare": "exact",
+  "reader": "junit-xml",
+  "select": "{f2p_test}"
+ },
+ "oracle": {
+  "kind": "fail-to-pass",
+  "fails_on": "base",
+  "passes_on": "gold"
+ },
+ "negative_control": {
+  "verb": "break",
+  "variant": "gold",
+  "expect": "observable_changes",
+  "then": null
+ },
+ "solver_input": {
+  "verb": "apply_patch",
+  "arg": "patch_file",
+  "variant": "base",
+  "probe_values": [
+   "/bench/gold.patch",
+   "/bench/empty.patch"
+  ]
+ },
+ "measure": null,
+ "predicates": [
+  {
+   "run": "git -C /work/repo rev-parse --verify {commit_hash}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /bench/gold.patch",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /bench/empty.patch",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "noop": "do nothing; print nothing.",
+  "apply_patch": "apply the unified diff from <patch_file> to the repository in <dir>/work/repo; print nothing.",
+  "run_tests": "run the repository's test suite in <dir>/work/repo and print the JUnit XML report to stdout; exit code is ignored.",
+  "break": "introduce a trivial syntax error into a source file in <dir>/work/repo to break the test suite; print nothing."
+ },
+ "_instance_fields": [
+  "repo_url",
+  "commit_hash",
+  "f2p_test"
+ ],
+ "_numbers_quoted": {}
+}

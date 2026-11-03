@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Check · {{ a.label }}{% endblock %}
+{% block content %}
+<h1>{{ a.label }} · {{ task }}</h1>
+<h2>The command</h2>
+<pre class="cmdline">{{ argv|cmdline }}</pre>
+<h2>Check {{ badge('ok' if check.exit == 0 else 'failed') }}</h2>
+<p class="muted small">{{ 'The command run with --dry-run' if a.check else 'A preview of the inputs and the output' }} · exit {{ check.exit }}</p>
+<pre>{{ check.output or '(no output)' }}</pre>
+{% if check.exit == 0 %}
+<form method="post" action="/action/{{ a.id }}/{{ task }}/run" class="aform confirm">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% for k, v in hidden.items() if k not in ('csrf', 'confirm') %}
+    {% if v is string %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% else %}{% for x in v %}<input type="hidden" name="{{ k }}" value="{{ x }}">{% endfor %}{% endif %}
+  {% endfor %}
+  <p>{% if a.paid %}<b>This calls a model and spends money</b> within the budgets you set.{% else %}This calls no model.{% endif %}
+    To run it, type <code>{{ confirm }}</code>:</p>
+  <div class="af-actions"><input name="confirm" autocomplete="off" placeholder="{{ confirm }}">
+    <button type="submit">Run</button>
+    <span class="muted small">{{ 'It runs detached; its log opens next.' if a.detached else 'It runs now; its output opens next.' }}</span></div>
+</form>
+{% else %}
+<div class="note bad-note">The check failed, so the command cannot run. Change the settings and check again.</div>
+{% endif %}
+<p><a href="javascript:history.back()">← back to the settings</a></p>
+{% endblock %}

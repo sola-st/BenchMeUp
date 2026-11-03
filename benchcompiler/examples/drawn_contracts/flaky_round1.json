@@ -1,0 +1,82 @@
+{
+ "verbs": {
+  "gen_inputs": {
+   "args": [
+    "dir"
+   ]
+  },
+  "run": {
+   "args": [
+    "dir",
+    "input"
+   ]
+  },
+  "reference_setup": {
+   "args": [
+    "dir"
+   ]
+  },
+  "break": {
+   "args": [
+    "dir"
+   ]
+  }
+ },
+ "variants": {
+  "reference": {
+   "setup": [
+    {
+     "verb": "gen_inputs",
+     "args": {}
+    },
+    {
+     "verb": "reference_setup",
+     "args": {}
+    }
+   ]
+  },
+  "solver": {
+   "setup": [
+    {
+     "verb": "gen_inputs",
+     "args": {}
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "run",
+  "compare": "exact",
+  "reader": null,
+  "select": null
+ },
+ "oracle": {
+  "kind": "reference-equivalence"
+ },
+ "negative_control": {
+  "verb": "break",
+  "variant": "solver",
+  "expect": "observable_changes",
+  "then": null
+ },
+ "solver_input": null,
+ "measure": null,
+ "predicates": [
+  {
+   "run": "git -C /work/repo rev-parse --verify {commit_hash}^{{commit}}",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "gen_inputs": null,
+  "run": null,
+  "reference_setup": null,
+  "break": null
+ },
+ "_instance_fields": [
+  "repo_url",
+  "commit_hash",
+  "test_id"
+ ],
+ "_numbers_quoted": {}
+}

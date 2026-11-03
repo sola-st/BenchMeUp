@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}{{ iid }}{% endblock %}
+{% block content %}
+<h1>{{ iid|short(100) }}</h1>
+{% if row %}
+<div class="stats">
+  <div class="stat"><div class="v">{% if row.accepted is none %}-{% else %}{{ badge('ok' if row.accepted else 'bad') }}{% endif %}</div><div class="k">acceptance{% if row.acceptance_run %}: {{ row.acceptance_run }}{% endif %}</div></div>
+  <div class="stat"><div class="v">{{ '✓' if row.counted else '-' }}</div><div class="k">counted</div></div>
+  <div class="stat"><div class="v">{{ row.from_run or '-' }}</div><div class="k">built in</div></div>
+</div>
+<h2>Verdict rows at delivery</h2>
+<p>{% for name, ok in row.rows.items() %}<span class="badge {{ 'ok' if ok else 'bad' }}">{{ name }}</span> {% endfor %}</p>
+<h2>Identity and fields</h2>
+<div class="kv">{% for k, v in row.fields.items() %}<div class="k">{{ k|replace('_', ' ') }}</div><div class="v">{% if v is string %}{{ v|truncate(600) }}{% else %}<code>{{ (v|tojson)|truncate(600) }}</code>{% endif %}</div>{% endfor %}</div>
+{% endif %}
+
+<h2>Files</h2>
+<ul class="files">{% for f in inst.files %}<li><a href="/benchmarks/{{ set_ }}/{{ task }}/{{ iid }}/file/{{ f }}" target="_blank">{{ f }}</a></li>{% endfor %}</ul>
+<p class="muted">To judge it: <code>cd benchmarks/{{ set_ }}/{{ task }} && ./bench prepare {{ iid }} && ./bench judge {{ iid }}</code></p>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% from "macros.html" import badge %}
+{% if not actions_on %}
+<div class="note">Actions are off: this UI is read-only. Start it with <code>bench-ui --allow-actions</code>
+  (from the repository, with its own <code>runs/</code> folder, after <code>set -a; . ./.env; set +a</code>) to launch,
+  freeze, package, certify and stop from here.</div>
+{% endif %}
+<p class="sub">Each action is a command of the pipeline. You fill in its settings, the UI shows the exact command and runs
+  its check (the command's own dry run, or a preview), and it runs only after you type the confirmation word.
+  Models, routes and budgets have no default: you choose them.</p>
+<div class="cards">
+{% for a in action_list(task) %}
+  <a class="card action-card" href="/action/{{ a.id }}/{{ task }}">
+    <h3>{{ a.label }} {% if a.paid %}<span class="badge warn">calls a model</span>{% else %}<span class="badge">no model</span>{% endif %}</h3>
+    <div class="muted small">{{ a.doc }}</div>
+  </a>
+{% endfor %}
+</div>
+<h2>Environment of this UI</h2>
+<p class="muted small">The commands inherit it. Values are never shown.</p>
+<div class="envrow">{% for n, ok in env_status() %}<span class="chip {{ 'k-delivered' if ok else 'k-open' }}">{{ n }} <small>{{ 'set' if ok else 'unset' }}</small></span>{% endfor %}</div>
+<h2>Recent actions for {{ task }}</h2>
+{% set js = task_jobs(task) %}
+{% if js %}
+<table class="dense"><thead><tr><th>when</th><th>what</th><th>kind</th><th>result</th></tr></thead><tbody>
+{% for j in js %}<tr><td class="nowrap muted">{{ j.started|when }}</td><td><a href="/jobs/{{ j.id }}">{{ j.action }}</a></td>
+  <td>{{ j.kind }}</td><td>{% if j.running %}{{ badge('running') }}{% elif j.exit == 0 %}{{ badge('ok') }}{% else %}{{ badge('failed') }} {{ j.exit }}{% endif %}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="empty">Nothing run from the UI for this task yet.</p>{% endif %}

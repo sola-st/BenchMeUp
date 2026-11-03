@@ -1,0 +1,224 @@
+{
+  "contract": {
+    "artifact_variants": [
+      {
+        "name": "prefix",
+        "description": "the repository snapshot at the pre-fix commit (the commit before the PR merged), installed with its test suite runnable, with the PR's own added/modified test applied. The check runs that test and passes only if it FAILS here -- the issue is reproducible",
+        "check_cmd": "sh check_prefix.sh .",
+        "expect": "pass"
+      },
+      {
+        "name": "postfix",
+        "description": "the repository snapshot at the PR's merge commit (the real fix applied), installed with its test suite runnable. The check runs the same test and passes only if it PASSES here",
+        "check_cmd": "sh check_postfix.sh .",
+        "expect": "pass"
+      }
+    ],
+    "measure": null,
+    "observables": [],
+    "parameters": []
+  },
+  "problems": [],
+  "rounds_used": 1,
+  "obligations": [],
+  "lifecycle": {
+    "design": {
+      "consumer_session": [
+        {
+          "command": "list",
+          "expect": "Available instances: swe-bench-1234, swe-bench-5678"
+        },
+        {
+          "command": "info swe-bench-1234",
+          "expect": "Instance: swe-bench-1234\nRepo: org/repo\nIssue: #42\nStatus: ready"
+        },
+        {
+          "command": "start swe-bench-1234",
+          "expect": "Instance swe-bench-1234 started. Sandbox: sbx-1234"
+        },
+        {
+          "command": "exec swe-bench-1234 -- python -m pytest tests/test_bug.py -v",
+          "expect": "Test output: ... (runs on postfix snapshot)"
+        },
+        {
+          "command": "stop swe-bench-1234",
+          "expect": "Instance swe-bench-1234 stopped."
+        },
+        {
+          "command": "rebuild-prefix swe-bench-1234",
+          "expect": "Prefix snapshot rebuilt."
+        },
+        {
+          "command": "check-prefix swe-bench-1234",
+          "expect": "Prefix test run: FAILED (as expected)"
+        },
+        {
+          "command": "rebuild-postfix swe-bench-1234",
+          "expect": "Postfix snapshot rebuilt."
+        },
+        {
+          "command": "check-postfix swe-bench-1234",
+          "expect": "Postfix test run: PASSED (as expected)"
+        }
+      ],
+      "key": {
+        "repo_url": "git_url",
+        "issue_number": "none",
+        "base_commit": "none",
+        "merge_commit": "none"
+      },
+      "normalize": {
+        "repo_url": "git_url",
+        "issue_number": "none",
+        "base_commit": "none",
+        "merge_commit": "none"
+      },
+      "states": [
+        {
+          "name": "FETCHED",
+          "requires": [
+            "sandbox",
+            "repo_url",
+            "base_commit",
+            "merge_commit",
+            "issue_number",
+            "problem_statement",
+            "test_patch",
+            "fail_to_pass"
+          ],
+          "requires_true": [],
+          "records": [],
+          "rederives": [],
+          "discriminates": null,
+          "enforces": [
+            "The instance must originate from a real, merged pull request that explicitly closes a reported issue."
+          ],
+          "self_graded": true,
+          "instruction": "Clone the repository at the given repo_url into the sandbox. Checkout base_commit and merge_commit as separate worktrees. Record the repo_url, base_commit, merge_commit, issue_number, problem_statement, test_patch, and fail_to_pass metadata. No automated verification is performed at this stage."
+        },
+        {
+          "name": "PATCHED",
+          "requires": [
+            "sandbox",
+            "prefix_test_applied",
+            "postfix_test_applied"
+          ],
+          "requires_true": [],
+          "records": [],
+          "rederives": [],
+          "discriminates": null,
+          "enforces": [
+            "The PR must add or modify a test file or test function within the same PR that claims to demonstrate the bug."
+          ],
+          "self_graded": true,
+          "instruction": "Apply the test_patch to the base_commit worktree (prefix snapshot) and to the merge_commit worktree (postfix snapshot). Record that the test has been applied to both snapshots. No automated verification is performed at this stage."
+        },
+        {
+          "name": "INSTALLED",
+          "requires": [
+            "sandbox",
+            "prefix_install_success",
+            "postfix_install_success"
+          ],
+          "requires_true": [
+            "prefix_install_success",
+            "postfix_install_success"
+          ],
+          "records": [],
+          "rederives": [],
+          "discriminates": null,
+          "enforces": [
+            "Both the pre-fix and post-fix snapshots must be installable and able to run the project's test harness (setup/install/test-invocation must succeed)."
+          ],
+          "self_graded": true,
+          "instruction": "Install the project dependencies and build the project in both the prefix and postfix worktrees. Verify that the project's test harness can be invoked (e.g., 'python -m pytest --version' succeeds). Record prefix_install_success and postfix_install_success as true if both succeed."
+        },
+        {
+          "name": "PREFIX_FAILED",
+          "requires": [
+            "sandbox",
+            "prefix_test_output"
+          ],
+          "requires_true": [],
+          "records": [
+            "prefix_test_output"
+          ],
+          "rederives": [
+            {
+              "cmd": "prefix_test_command",
+              "mode": "digest"
+            }
+          ],
+          "discriminates": null,
+          "enforces": [
+            "The PR's own added/modified test must fail when executed on the pre-fix snapshot (with the test applied) and pass when executed on the PR's merge commit; both outcomes must be confirmed by automated test runs."
+          ],
+          "self_graded": false,
+          "instruction": "Run the submitted test on the prefix snapshot using the project's test harness. Capture the full test output to prefix_test_output. The test must fail (non-zero exit code). Record the exact command used in prefix_test_command."
+        },
+        {
+          "name": "POSTFIX_PASSED",
+          "requires": [
+            "sandbox",
+            "postfix_test_output"
+          ],
+          "requires_true": [],
+          "records": [
+            "postfix_test_output"
+          ],
+          "rederives": [
+            {
+              "cmd": "postfix_test_command",
+              "mode": "digest"
+            }
+          ],
+          "discriminates": {
+            "clean": "postfix_test_output",
+            "perturbed": "prefix_test_output",
+            "describe": "prefix_test_output should contain failure, postfix_test_output should contain success"
+          },
+          "enforces": [
+            "The PR's own added/modified test must fail when executed on the pre-fix snapshot (with the test applied) and pass when executed on the PR's merge commit; both outcomes must be confirmed by automated test runs."
+          ],
+          "self_graded": false,
+          "instruction": "Run the submitted test on the postfix snapshot using the project's test harness. Capture the full test output to postfix_test_output. The test must pass (zero exit code). Record the exact command used in postfix_test_command."
+        },
+        {
+          "name": "VALIDATED",
+          "requires": [
+            "sandbox",
+            "prefix_test_output",
+            "postfix_test_output",
+            "prefix_install_success",
+            "postfix_install_success",
+            "repo_url",
+            "base_commit",
+            "merge_commit",
+            "issue_number",
+            "problem_statement",
+            "test_patch",
+            "fail_to_pass"
+          ],
+          "requires_true": [
+            "prefix_install_success",
+            "postfix_install_success"
+          ],
+          "records": [],
+          "rederives": [],
+          "discriminates": null,
+          "enforces": [
+            "Project must be a Python project and must not be one of the 12 excluded repositories: astropy/astropy, django/django, matplotlib/matplotlib, mwaskom/seaborn, pallets/flask, psf/requests, pydata/xarray, pylint-dev/pylint, pytest-dev/pytest, scikit-learn/scikit-learn, sphinx-doc/sphinx, sympy/sympy."
+          ],
+          "self_graded": true,
+          "instruction": "Verify that the repository is a Python project (e.g., has setup.py, pyproject.toml, or requirements.txt) and that the repo_url does not match any of the 12 excluded repositories. Record all metadata fields. This state is self-graded; the builder asserts compliance."
+        }
+      ],
+      "terminal": "VALIDATED"
+    },
+    "problems": [
+      "no identity key was designed -- duplicates would be undetectable",
+      "variants are declared but no state requires variants_root"
+    ],
+    "rounds_used": 5
+  }
+}

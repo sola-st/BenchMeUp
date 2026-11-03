@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Compare{% endblock %}
+{% block content %}
+<h1>Compare</h1>
+<p class="sub">What each model's construction cost and delivered, per task, and how each construction run of a task did over time.
+  Cost and hours are the workers' own meters (hours = wall clock summed over workers).</p>
+<nav class="tabs"><a href="?" class="{{ 'on' if not task }}">all tasks</a>{% for t in tasks %}<a href="?task={{ t }}" class="{{ 'on' if t == task }}">{{ t }}</a>{% endfor %}</nav>
+
+{% if not task %}
+<table class="dense">
+  <thead><tr><th>task</th><th>construction model</th><th class="num">runs</th><th class="num">taken</th><th class="num">delivered</th>
+    <th class="num">delivered / taken</th><th class="num">cost</th><th class="num">$ per delivery</th><th class="num">worker-hours per delivery</th><th class="num">packaged</th></tr></thead>
+  <tbody>
+  {% for r in rows %}<tr>
+    <td>{% if loop.first or r.task != loop.previtem.task %}<a href="?task={{ r.task }}"><b>{{ r.task }}</b></a>{% endif %}</td>
+    <td>{{ r.model }}</td><td class="num">{{ r.runs }}</td><td class="num">{{ r.taken }}</td><td class="num">{{ r.delivered }}</td>
+    <td class="num">{{ '%d%%'|format(r.rate * 100) if r.rate is not none else '-' }}</td>
+    <td class="num">{{ r.cost|money }}</td><td class="num"><b>{{ r.cost_per|money if r.cost_per is not none else '-' }}</b></td>
+    <td class="num">{{ '%.1f'|format(r.hours_per) if r.hours_per is not none else '-' }}</td>
+    <td class="num">{{ r.packaged or '-' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted small">Delivered counts each delivery (a candidate built by two models counts for each). Costs on the Claude Code route are the CLI's reported list price.</p>
+
+{% else %}
+<h2>Construction, by model</h2>
+<table class="dense">
+  <thead><tr><th>model</th><th class="num">runs</th><th class="num">workers</th><th class="num">taken</th><th class="num">delivered</th><th class="num">dropped</th>
+    <th class="num">delivered / taken</th><th class="num">cost</th><th class="num">$ per delivery</th><th class="num">worker-hours</th><th class="num">hours per delivery</th><th class="num">packaged</th></tr></thead>
+  <tbody>{% for r in rows %}<tr><td><b>{{ r.model }}</b></td><td class="num">{{ r.runs }}</td><td class="num">{{ r.workers }}</td>
+    <td class="num">{{ r.taken }}</td><td class="num">{{ r.delivered }}</td><td class="num">{{ r.dropped }}</td>
+    <td class="num">{{ '%d%%'|format(r.rate * 100) if r.rate is not none else '-' }}</td><td class="num">{{ r.cost|money }}</td>
+    <td class="num"><b>{{ r.cost_per|money if r.cost_per is not none else '-' }}</b></td><td class="num">{{ '%.0f'|format(r.hours) }}</td>
+    <td class="num">{{ '%.1f'|format(r.hours_per) if r.hours_per is not none else '-' }}</td><td class="num">{{ r.packaged or '-' }}</td></tr>
+  {% else %}<tr><td colspan="12" class="empty">No construction run.</td></tr>{% endfor %}</tbody>
+</table>
+
+<h2>Search, by model</h2>
+<table class="dense narrow">
+  <thead><tr><th>model</th><th class="num">campaigns</th><th class="num">agents</th><th class="num">candidates found</th><th class="num">cost</th><th class="num">found per $</th></tr></thead>
+  <tbody>{% for r in search %}<tr><td><b>{{ r.model|model }}</b></td><td class="num">{{ r.campaigns }}</td><td class="num">{{ r.agents }}</td>
+    <td class="num">{{ r.found }}</td><td class="num">{{ r.cost|money }}</td><td class="num">{{ '%.0f'|format(r.per_dollar) if r.per_dollar else '-' }}</td></tr>
+  {% else %}<tr><td colspan="6" class="empty">No search campaign.</td></tr>{% endfor %}</tbody>
+</table>
+<p class="muted small">Found: lines in the agents' stock files before freezing (not deduplicated).</p>
+
+<h2>Construction runs over time</h2>
+{% if trend %}
+{% set W = 1300 %}{% set H = 170 %}{% set n = trend|length %}{% set bw = (W - 40) / n %}
+{% set top = [trend|map(attribute='delivered')|max, trend|map(attribute='dropped')|max, 1]|max %}
+{% set ctop = [trend|map(attribute='cost')|max, 0.01]|max %}
+<div class="legend small"><span class="sw sw-ok"></span>delivered <span class="sw sw-bad"></span>dropped · one pair of bars per run, oldest first · a dashed line marks a change of model · hover a run for its numbers</div>
+<div class="chart-scroll">
+<svg class="chart" width="{{ W }}" height="{{ H + 70 }}" role="img" aria-label="delivered and dropped per construction run">
+  <line class="axis" x1="30" x2="{{ W }}" y1="{{ H }}" y2="{{ H }}"></line>
+  <text class="tick" x="26" y="14" text-anchor="end">{{ top }}</text><text class="tick" x="26" y="{{ H }}" text-anchor="end">0</text>
+  {% for r in trend %}{% set x = 34 + loop.index0 * bw %}{% set bar = [bw / 2 - 3, 18]|min %}
+  <g class="pair"><title>{{ r.label }} · {{ r.model }}: {{ r.delivered }} delivered, {{ r.dropped }} dropped, {{ r.cost|money }}{{ ' (running)' if r.running }}</title>
+    <rect class="hit" x="{{ x }}" y="0" width="{{ bw }}" height="{{ H + 66 }}"></rect>
+    {% set hd = (H - 6) * r.delivered / top %}{% set hp = (H - 6) * r.dropped / top %}
+    <rect class="b-ok" x="{{ x + bw / 2 - bar - 1 }}" y="{{ H - hd }}" width="{{ bar }}" height="{{ hd }}" rx="2"></rect>
+    <rect class="b-bad" x="{{ x + bw / 2 + 1 }}" y="{{ H - hp }}" width="{{ bar }}" height="{{ hp }}" rx="2"></rect>
+    <text class="tick" text-anchor="end" transform="translate({{ x + bw / 2 + 3 }},{{ H + 10 }}) rotate(-35)">{{ r.label|replace('epoch_', 'e')|truncate(14, true, '…') }}</text>
+    {% if not loop.first and r.model != loop.previtem.model %}<line class="sep" x1="{{ x }}" x2="{{ x }}" y1="0" y2="{{ H }}"></line>{% endif %}
+  </g>{% endfor %}
+</svg>
+</div>
+<div class="legend small">cost per run ($) · same runs, same order</div>
+<div class="chart-scroll">
+<svg class="chart" width="{{ W }}" height="{{ 90 }}" role="img" aria-label="cost per construction run">
+  <line class="axis" x1="30" x2="{{ W }}" y1="70" y2="70"></line>
+  <text class="tick" x="26" y="12" text-anchor="end">{{ ctop|money }}</text>
+  {% for r in trend %}{% set x = 34 + loop.index0 * bw %}{% set hc = 62 * r.cost / ctop %}
+  <g><title>{{ r.label }}: {{ r.cost|money }}</title><rect class="hit" x="{{ x }}" y="0" width="{{ bw }}" height="80"></rect>
+    <rect class="b-cost" x="{{ x + bw / 2 - 6 }}" y="{{ 70 - hc }}" width="12" height="{{ hc }}" rx="2"></rect></g>{% endfor %}
+</svg>
+</div>
+<details><summary>As a table</summary>
+<table class="dense narrow"><thead><tr><th>run</th><th>model</th><th class="num">delivered</th><th class="num">dropped</th><th class="num">cost</th><th>started</th></tr></thead><tbody>
+{% for r in trend %}<tr><td><a href="/construction/{{ r.key }}">{{ r.label }}</a></td><td class="muted">{{ r.model }}</td><td class="num">{{ r.delivered }}</td><td class="num">{{ r.dropped }}</td><td class="num">{{ r.cost|money }}</td><td class="muted nowrap">{{ r.started|when }}</td></tr>{% endfor %}
+</tbody></table></details>
+{% else %}<p class="empty">No construction run.</p>{% endif %}
+{% endif %}
+{% endblock %}

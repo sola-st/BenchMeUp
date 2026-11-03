@@ -1,0 +1,96 @@
+{
+ "verbs": {
+  "extract": {
+   "args": [
+    "dir"
+   ]
+  },
+  "classify": {
+   "args": [
+    "dir"
+   ]
+  },
+  "copy_gold": {
+   "args": [
+    "dir"
+   ]
+  },
+  "output": {
+   "args": [
+    "dir"
+   ]
+  },
+  "break": {
+   "args": [
+    "dir"
+   ]
+  }
+ },
+ "variants": {
+  "gold": {
+   "setup": [
+    {
+     "verb": "copy_gold",
+     "args": {}
+    }
+   ]
+  },
+  "solver": {
+   "setup": [
+    {
+     "verb": "extract",
+     "args": {}
+    },
+    {
+     "verb": "classify",
+     "args": {}
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "output",
+  "compare": "exact",
+  "reader": null,
+  "select": null
+ },
+ "oracle": {
+  "kind": "reference-equivalence"
+ },
+ "negative_control": {
+  "verb": "break",
+  "variant": "gold",
+  "expect": "observable_changes",
+  "then": null
+ },
+ "solver_input": null,
+ "measure": null,
+ "predicates": [
+  {
+   "run": "git -C /work/repo rev-parse --verify {commit_hash}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /work/repo/{file_path}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f gold.txt",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "extract": "from /work/repo, extract the old and new source of the single modified function (using git diff and the file path from instance.json), write them as old.py and new.py into <dir>, and print nothing",
+  "classify": "read <dir>/old.py and <dir>/new.py, write the predicted label (semantics-preserving or semantics-changing) to <dir>/result.txt, and print nothing",
+  "copy_gold": "copy gold.txt from the instance directory to <dir>/result.txt, and print nothing",
+  "output": "print the contents of <dir>/result.txt to stdout, and nothing else",
+  "break": "overwrite <dir>/result.txt with a wrong label (semantics-changing if gold is semantics-preserving, and vice versa), so that output's stdout changes"
+ },
+ "_instance_fields": [
+  "repo_url",
+  "commit_hash",
+  "file_path",
+  "function_name"
+ ],
+ "_numbers_quoted": {}
+}

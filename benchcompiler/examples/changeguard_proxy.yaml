@@ -1,0 +1,97 @@
+# ChangeGuard, variant 2: same task/data as changeguard.yaml, but with the
+# correctness oracle redesigned around an AUTOMATED, well-specified proxy
+# (large-scale differential testing) instead of human annotation -- to test
+# whether this closes the UNPRICEABLE/NON_OPERATIONAL gaps found in v1.
+#
+# Important: this changes what the benchmark actually measures (agreement
+# with a testing-based proxy, not with human semantic judgment) -- a
+# different, not merely cheaper, scientific claim. That's fine as long as
+# it's stated honestly, which is the point of naming it explicitly here
+# rather than silently swapping it in.
+
+task: |
+  Given a code change to a single Python function (old version vs. new
+  version), decide whether the change is semantics-preserving (behavior
+  unchanged) or semantics-changing.
+
+instance: |
+  input: the old and new source of one function, from a single commit
+  expected output: a label in {semantics-preserving, semantics-changing}
+
+data: |
+  Ten named open-source Python projects (Airflow, Black, FastAPI, Flask,
+  HTTPie, Pandas, Poetry, Scikit-Learn, Scrapy, TheAlgorithms) -- the fixed
+  list, not a criterion to rerun. Candidate = a single commit, dated before
+  2023-11-01, that: is not a merge commit; modifies (not adds/removes)
+  exactly one function; touches only a non-test Python file (path contains
+  "test" or "tests/", or filename starts with "test_" or ends with
+  "_test.py" -- excluded); and whose old/new function parse into
+  structurally different ASTs (Python 3.11 `ast` module, comments/
+  decorators/type-annotations stripped before comparison).
+
+admissibility: |
+  not applicable: the sources are the ten named projects listed in `data` above -- a fixed
+  enumerated list the paper froze, explicitly not a criterion to rerun, so there is no
+  population for a floor to bound.
+
+correctness: |
+  reference-equivalence via large-scale automated differential testing, NOT
+  human annotation: generate a diverse input battery per function pair using
+  an automated property-based test generator (e.g. Hypothesis, seeded from
+  the function's parameter type hints and any existing project test cases
+  that exercise it) -- at least 2,000 generated inputs per function pair,
+  or until 5 minutes of generation wall-clock is spent, whichever first.
+  Execute both the old and new function on every generated input under
+  identical conditions (same environment, mocked I/O/network/filesystem
+  where the function has side effects). Decision rule: if ANY generated
+  input produces a different return value, raised exception, or observable
+  side-effect (file write, logged output) between old and new: label
+  "semantics-changing" (definitive -- a concrete counterexample exists).
+  If NO generated input exposes a difference after the full input battery:
+  label "semantics-preserving (bounded confidence: N inputs tested, X%
+  branch coverage achieved on the old function, per coverage.py)" -- an
+  explicitly probabilistic call, not a certainty claim, with the testing
+  extent reported alongside every such label.
+
+interface: |
+  CLI: `bench gen <id>` runs the input-battery generation and differential
+  execution, writing a JSON verdict {label, inputs_tested, coverage_pct,
+  counterexample?}; `bench eval <id> <submitted-label>` compares a
+  submission against the generated verdict.
+
+scale: |
+  ~450 candidate commits meeting the criteria (est., matching the original
+  paper's 299+165 combined scale); compute budget: up to 5 minutes generation
+  + execution per instance, ~450 instances -> under 40 CPU-hours total;
+  human budget 0h (fully automated oracle).
+
+criteria: |
+  - non-merge commit modifying exactly one function
+  - non-test Python file (see data field for the exact rule)
+  - old/new function differ at the AST level after normalization
+  - commits dated before 2023-11-01
+  - function must be callable in isolation with generatable inputs (pure
+    enough for property-based testing -- excludes functions requiring
+    un-mockable external state, e.g. live network calls with no mock point)
+
+quality: |
+  - coverage floor: an instance's "semantics-preserving" label is only
+    retained if generated-input testing achieved >=70% branch coverage of
+    the old function (per coverage.py); below that, label as "unclear:
+    insufficient coverage" rather than a false-confidence preserving call
+  - corruption check: a deliberately introduced behavioral change (e.g.
+    flipping a comparison operator) must be caught by the generator on a
+    sample of instances, or the input-generation strategy is judged inadequate
+
+examples: |
+  Real instances from the paper's own release (github.com/sola-st/ChangeGuard):
+  - semantics-preserving: apache/airflow commit 8ea094f (dead dict-entry
+    removal) -- expect the generated battery to find no divergence.
+  - semantics-changing: apache/airflow commit a1a23528 (log end-of-stream
+    detection logic change) -- expect the generated battery to find a
+    concrete counterexample input exposing the behavioral difference.
+
+constraints: |
+  - Python only; single-function-scoped changes only
+  - functions with unmockable external side effects (network, real filesystem
+    writes without a mock point) are inadmissible per criteria

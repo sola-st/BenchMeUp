@@ -1,0 +1,38 @@
+{% from "macros.html" import badge %}
+<form class="toolbar" method="get">
+  <input type="hidden" name="tab" value="drops">
+  <label class="muted" for="drop-run">construction runs</label>
+  <select id="drop-run" name="run" onchange="this.form.submit()">
+    <option value="">all {{ runs|length }} runs</option>
+    {% for r in runs|sort(attribute='started', reverse=true) %}<option value="{{ r.key }}" {{ 'selected' if r.key == run }}>{{ r.label }}</option>{% endfor %}
+  </select>
+  <span class="muted small">{{ drop_rows|length }} dropped candidates</span>
+</form>
+{% if drop_rows %}
+<p class="muted small">Grouped by the stage the candidate was on and the first row its last replay check failed.
+  "no replay check": the worker dropped it before asking for any check (from reading the commit or the repository).
+  "checks passed": its last check passed, and the worker dropped it for another reason.</p>
+<table class="dense">
+  <thead><tr><th class="num">dropped</th><th>stage</th><th>failing check</th><th>a typical reason (the worker's words)</th></tr></thead>
+  <tbody>
+  {% for g in drop_groups %}
+  <tr>
+    <td class="num"><b>{{ g['items']|length }}</b></td>
+    <td class="nowrap">stage {{ g.stage }}{% if plan.stages and g.stage <= plan.stages|length %} <span class="muted small">{{ plan.stages[g.stage - 1].stage.name|truncate(40) }}</span>{% endif %}</td>
+    <td><code>{{ g.row }}</code></td>
+    <td class="small">
+      <details class="inline" id="dg-{{ loop.index }}"><summary>{{ g['items'][0].reason|truncate(170) or '-' }}</summary>
+        <table class="dense inner"><tbody>
+        {% for r in g['items'][:60] %}<tr>
+          <td class="nowrap"><a href="/candidate?q={{ r.key|urlencode }}">{{ r.key|key }}</a></td>
+          <td class="nowrap muted">{{ r.run }} · {{ r.worker }} · {{ r.model|model }}</td>
+          <td>{{ r.reason|truncate(260) }}{% if r.recipe %} <a href="/construction/{{ r.run_key }}/{{ r.worker }}/recipe/{{ r.recipe }}">checks</a>{% endif %}</td></tr>
+        {% endfor %}
+        {% if g['items']|length > 60 %}<tr><td colspan="3" class="muted">+ {{ g['items']|length - 60 }} more</td></tr>{% endif %}
+        </tbody></table>
+      </details></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No dropped candidate in {{ 'this run' if run else 'any construction run of this task' }}.</p>{% endif %}

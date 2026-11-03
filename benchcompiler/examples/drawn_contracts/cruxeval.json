@@ -1,0 +1,121 @@
+{
+ "verbs": {
+  "prepare": {
+   "args": [
+    "dir",
+    "function_source_file",
+    "given_file"
+   ]
+  },
+  "write_gold": {
+   "args": [
+    "dir",
+    "gold_answer_file"
+   ]
+  },
+  "apply_submission": {
+   "args": [
+    "dir",
+    "submission"
+   ]
+  },
+  "check": {
+   "args": [
+    "dir"
+   ]
+  },
+  "break": {
+   "args": [
+    "dir"
+   ]
+  }
+ },
+ "variants": {
+  "gold": {
+   "setup": [
+    {
+     "verb": "prepare",
+     "args": {
+      "function_source_file": "{function_source_file}",
+      "given_file": "{given_file}"
+     }
+    },
+    {
+     "verb": "write_gold",
+     "args": {
+      "gold_answer_file": "gold_answer.txt"
+     }
+    }
+   ]
+  },
+  "submission": {
+   "setup": [
+    {
+     "verb": "prepare",
+     "args": {
+      "function_source_file": "{function_source_file}",
+      "given_file": "{given_file}"
+     }
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "check",
+  "compare": "exact",
+  "reader": "exit-code",
+  "select": null
+ },
+ "oracle": {
+  "kind": "fail-to-pass",
+  "fails_on": "submission",
+  "passes_on": "gold"
+ },
+ "negative_control": {
+  "verb": "break",
+  "variant": "gold",
+  "expect": "observable_changes",
+  "then": null
+ },
+ "solver_input": {
+  "verb": "apply_submission",
+  "arg": "submission",
+  "variant": "submission",
+  "probe_values": [
+   "/bench/gold_answer.txt",
+   "/bench/wrong_answer.txt"
+  ]
+ },
+ "measure": null,
+ "predicates": [
+  {
+   "run": "test -f /bench/{function_source_file}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /bench/{given_file}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /bench/gold_answer.txt",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /bench/wrong_answer.txt",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "prepare": "Copy the function source file and the given value file from /bench to <dir>.",
+  "write_gold": "Copy the gold answer file from /bench to <dir>/submission.txt.",
+  "apply_submission": "Copy the submission file (provided as argument) to <dir>/submission.txt.",
+  "check": "Read the function source, given value, and submission from <dir>, execute the function to verify correctness, and exit with 0 if correct, 1 otherwise.",
+  "break": "Overwrite <dir>/submission.txt with a wrong answer (e.g., 'wrong') to corrupt the check."
+ },
+ "_instance_fields": [
+  "task",
+  "function_source_file",
+  "given_file"
+ ],
+ "_numbers_quoted": {}
+}

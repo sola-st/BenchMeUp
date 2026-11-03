@@ -1,0 +1,62 @@
+{% if not plan.exists %}<p class="empty">No construction plan for this task.</p>{% else %}
+<p class="sub">Generated from the specification{% if plan.drawn.model %} by <code>{{ plan.drawn.model }}</code>{% endif %}.
+Every construction agent of this task follows it; the framework replays each stage in a fresh container.</p>
+
+<h2>Stages</h2>
+{% for s in plan.stages %}
+<details id="stage-{{ s.n }}" {% if loop.first %}open{% endif %}>
+  <summary>Stage {{ s.n }}: {{ s.stage.name }}</summary>
+  <div class="stage-meta">
+    <span><span class="muted">files</span> {% for f in s.stage.files or [] %}<code>{{ f }}</code> {% else %}<span class="muted">-</span>{% endfor %}</span>
+    {% if s.stage.verbs is defined %}<span><span class="muted">commands</span> {% for v in s.stage.verbs or [] %}<code>{{ v }}</code> {% else %}<span class="muted">none</span>{% endfor %}</span>{% endif %}
+    {% if s.stage.rows is defined %}<span><span class="muted">replay checks</span> {% for r in s.stage.rows or [] %}<span class="badge">{{ r }}</span> {% endfor %}</span>{% endif %}
+  </div>
+  {% if s.stage.goal %}<h3>Goal</h3><div class="prose">{{ s.stage.goal }}</div>{% endif %}
+  {% if s.stage.done_when %}<h3>Done when</h3><div class="prose">{{ s.stage.done_when }}</div>{% endif %}
+  {% for k, v in s.stage.items() if k not in ('name', 'files', 'goal', 'done_when', 'verbs', 'rows') %}
+    <h3>{{ k|replace('_', ' ') }}</h3>{% if v is string %}<div class="prose">{{ v }}</div>{% else %}<pre>{{ v|tojson_pretty }}</pre>{% endif %}
+  {% endfor %}
+  {% if s.text %}
+  <details class="sub-details" id="stage-text-{{ s.n }}"><summary>What the worker reads at this stage</summary>
+    {% for k, v in s.text.items() %}<h3>{{ k|replace('_', ' ') }}</h3><div class="prose">{{ v }}</div>{% endfor %}
+  </details>
+  {% endif %}
+</details>
+{% endfor %}
+
+<h2>Commands</h2>
+<table><thead><tr><th>command</th><th>arguments</th><th>what it must do</th></tr></thead><tbody>
+{% for v in plan.verbs %}<tr><td><code>{{ v.name }}.sh</code></td><td><code>{{ v.args|join(' ') }}</code></td><td class="wrap">{{ v.does or '-' }}</td></tr>{% endfor %}
+</tbody></table>
+
+<h2>Versions</h2>
+<table><thead><tr><th>version</th><th>built by</th></tr></thead><tbody>
+{% for name, v in plan.variants.items() %}<tr><td><code>{{ name }}</code></td>
+  <td>{% for step in v.setup or [] %}<code>{{ step.verb }}{% for k, a in (step.args or {}).items() %} {{ a }}{% endfor %}</code>{{ ' → ' if not loop.last }}{% endfor %}</td></tr>{% endfor %}
+</tbody></table>
+
+<h2>Checks and oracle</h2>
+<table><thead><tr><th>check</th><th>read as</th><th>selects</th></tr></thead><tbody>
+{% for c in plan.checks %}<tr><td><code>{{ c.verb }}.sh</code></td><td>{{ c.reader or 'raw output' }}</td><td><code>{{ c.select or '-' }}</code></td></tr>{% endfor %}
+</tbody></table>
+<div class="kv" style="margin-top: 10px">
+  <div class="k">oracle</div><div class="v"><code>{{ plan.oracle|tojson_pretty }}</code></div>
+  {% if plan.negative_control %}<div class="k">fix-removal probe</div><div class="v"><code>{{ plan.negative_control|tojson_pretty }}</code></div>{% endif %}
+  {% if plan.solver_input %}<div class="k">technique input</div><div class="v"><code>{{ plan.solver_input|tojson_pretty }}</code></div>{% endif %}
+  {% if plan.measure %}<div class="k">measurement</div><div class="v"><code>{{ plan.measure|tojson_pretty }}</code></div>{% endif %}
+  <div class="k">identity</div><div class="v">{{ (plan.identity or [])|join(', ') or '-' }}</div>
+</div>
+
+{% if plan.predicates %}
+<h3>Preconditions (checked in a fresh clone)</h3>
+<table><thead><tr><th>command</th><th>require</th></tr></thead><tbody>
+{% for p in plan.predicates %}<tr><td class="wrap"><code>{{ p.run }}</code></td><td>{{ p.require }}</td></tr>{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if lessons.pinned or lessons.lessons %}
+<h2>Lessons the workers read</h2>
+{% if lessons.pinned %}<details open><summary>Pinned notes</summary><pre>{{ lessons.pinned }}</pre></details>{% endif %}
+{% if lessons.lessons %}<details><summary>lessons.md</summary><pre>{{ lessons.lessons }}</pre></details>{% endif %}
+{% endif %}
+{% endif %}

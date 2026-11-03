@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Candidate{% endblock %}
+{% block content %}
+<h1>Candidate {{ (j.repo or '') ~ (' @ ' ~ j.sha[:8] if j.sha else '') }}</h1>
+<form class="toolbar" method="get" action="/candidate">
+  <input type="search" name="q" value="{{ j.q }}" placeholder="owner/repo @ commit, a GitHub URL, or a commit hash">
+  <button type="submit">Find</button>
+</form>
+{% if not (j.repo or j.sha) %}
+<p class="empty">Type a repository and commit (owner/repo @ abc1234), a GitHub URL, or a commit hash.</p>
+{% else %}
+<ol class="journey">
+  <li class="{{ 'on' if j.found else 'off' }}"><div class="jt">found by search</div>
+    {% for f in j.found %}<div><a href="/search/{{ f.task }}/{{ f.epoch }}/{{ f.attempt }}">{{ f.task }} {{ f.epoch }} {{ f.attempt }}</a>
+      {% if f.line.evidence %}<div class="muted small">“{{ f.line.evidence|truncate(300) }}”</div>{% endif %}</div>
+    {% else %}<div class="muted">not in any search agent's stock file under the runs folder</div>{% endfor %}</li>
+  <li class="{{ 'on' if j.frozen else 'off' }}"><div class="jt">frozen</div>
+    {% for f in j.frozen %}<div><a href="/candidates/stock/{{ f.stock }}">stock {{ f.stock }}</a> <span class="muted small">{{ f.frozen_at|when }}</span></div>
+    {% else %}<div class="muted">in no frozen stock of this repository</div>{% endfor %}</li>
+  <li class="{{ 'on' if j.built else 'off' }}"><div class="jt">construction</div>
+    {% for b in j.built %}
+    <div class="jb">
+      <div><a href="/construction/{{ b.run_key }}/{{ b.worker }}">{{ b.run }} · {{ b.worker }}</a> <span class="muted small">{{ b.model|model }}</span>
+        {{ badge(b.outcome) if b.outcome != 'open' else badge('unfinished') }} <span class="muted small">reached stage {{ b.stage }}</span>
+        {% if b.recipe %}<a class="small" href="/construction/{{ b.run_key }}/{{ b.worker }}/recipe/{{ b.recipe }}">replay checks</a>{% endif %}</div>
+      {% if b.checks %}<div class="checks-line">{% for c in b.checks %}<span class="chip {{ 'k-delivered' if c.ok else 'k-dropped' }}" title="{{ c.file }} {{ c.ts|when }}{% for n, ok in c.rows if not ok %} · {{ n }} failed{% endfor %}">{{ c.file|replace('.json', '') }}</span>{% endfor %}</div>{% endif %}
+      {% if b.reason %}<div class="small">{{ b.reason|truncate(600) }}</div>{% endif %}
+      <div class="muted small">states: {{ b.history|join(' → ') }}</div>
+    </div>
+    {% else %}<div class="muted">no construction run took it</div>{% endfor %}</li>
+  <li class="{{ 'on' if j.packaged else 'off' }}"><div class="jt">packaged</div>
+    {% for p in j.packaged %}<div><a href="/benchmarks/{{ p.set }}/{{ p.task }}/{{ p.id }}">{{ p.set }} / {{ p.task }}</a>
+      {% if p.accepted %}{{ badge('ok') }} accepted{% elif p.accepted == false %}{{ badge('failed') }} failed acceptance{% endif %}
+      {% if p.counted %} · counted{% endif %}</div>
+    {% else %}<div class="muted">in no packaged benchmark</div>{% endfor %}</li>
+</ol>
+{% endif %}
+{% endblock %}

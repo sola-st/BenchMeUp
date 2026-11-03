@@ -1,0 +1,77 @@
+# Real paper: SWE-smith (reported as NeurIPS 2025 Datasets &
+# Benchmarks track per external sources -- NOT confirmed inside the PDF
+# itself, flagged honestly; arXiv:2504.21798). Reverse-engineered from the
+# actual PDF methodology section.
+
+task: |
+  Given a synthetic GitHub-issue-style bug report and a repository snapshot,
+  produce a patch that fixes the described bug (training/eval data for
+  software-engineering coding agents).
+
+instance: |
+  input: a repository snapshot + a generated issue-style problem statement
+  expected output: a patch (.diff) resolving the issue
+
+data: |
+  128 GitHub Python repositories, selected from top PyPI packages ranked by
+  GitHub stars, keeping only those with >=1,000 stars and excluding the 12
+  SWE-bench test repositories. Candidate = a synthesized bug patch produced
+  by one of four strategies per repository: LM Generation (an LM introduces
+  errant modifications into an existing function, or rewrites a function
+  from just its header+docstring), Procedural Modification (random AST-level
+  transformations: remove a conditional/loop, change an operator, etc.),
+  Combine Bugs (aggregating multiple single-function candidates from the
+  same file/module into one multi-part task), and Invert PRs / PR Mirror
+  (an LM reverts a real merged PR's diff back onto the current codebase).
+
+admissibility: |
+  GitHub repositories in Python drawn from the top PyPI packages ranked by GitHub stars,
+  keeping only those with at least 1000 stars, and never one of the 12 repositories
+  SWE-bench uses for testing.
+
+correctness: |
+  Two distinct stages, both execution-based:
+  (1) Candidate admissibility (construction time): apply the candidate
+  bug-injection patch, run the repo's test suite, keep the candidate only
+  if it breaks >=1 previously-passing test (Fail-to-Pass/F2P), within a
+  2-minute runtime cap. This determines which synthesized bugs enter the
+  dataset at all.
+  (2) Evaluation of a submitted solution (fail-to-pass-tests, SWE-bench
+  Pass@1 protocol): apply the system's submitted patch to the broken
+  snapshot, then run both the instance's F2P tests (must now pass) and its
+  Pass-to-Pass tests / P2P (previously-passing tests that must remain
+  passing, i.e. no regressions). The submission is correct iff both
+  conditions hold. SWE-smith explicitly defers this evaluation step to the
+  SWE-bench harness/protocol unchanged ("use SWE-bench to evaluate how
+  good your models are").
+
+interface: |
+  Each task instance is a SWE-bench-style JSON record: the bug patch is
+  applied and pushed as a branch to a mirror clone of the repository, then
+  populated with Fail-to-Pass and Pass-to-Pass test fields derived from the
+  validation logs (via an adapted SWE-bench validation script). Consumers
+  submit a unified-diff patch per instance and score it with the standard
+  SWE-bench evaluation harness (unchanged). Public assets (collection code,
+  task instances, agent trajectories, models) at swesmith.com.
+
+scale: |
+  50,000 task instances synthesized from 128 repositories.
+
+criteria: |
+  - source repo must be a top-ranked PyPI package with >=1,000 GitHub stars
+  - excludes the 12 repositories used in SWE-bench's test set (contamination avoidance)
+  - candidate patch must produce at least one Fail-to-Pass test within the 2-minute budget
+
+quality: |
+  - execution-based filter is the primary gate (F2P requirement)
+  - remaining manual effort: parsing correct install/setup procedures per
+    repository from agent trajectories (~7 minutes/repo)
+
+examples: |
+  - known-valid: any retained candidate that, per the paper's own pipeline,
+    produced a Fail-to-Pass test after patch application
+  - known-invalid: a candidate patch that alters code but breaks no existing
+    test (no behavioral signal to detect)
+
+constraints: |
+  - Python repositories only

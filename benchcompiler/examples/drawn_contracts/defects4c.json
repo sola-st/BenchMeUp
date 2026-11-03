@@ -1,0 +1,86 @@
+{
+ "verbs": {
+  "build": {
+   "args": [
+    "dir"
+   ]
+  },
+  "run_tests": {
+   "args": [
+    "dir"
+   ]
+  },
+  "apply_patch": {
+   "args": [
+    "dir",
+    "patch"
+   ]
+  }
+ },
+ "variants": {
+  "buggy": {
+   "setup": [
+    {
+     "verb": "build",
+     "args": {}
+    }
+   ]
+  },
+  "fixed": {
+   "setup": [
+    {
+     "verb": "apply_patch",
+     "args": {
+      "patch": "/bench/gold.patch"
+     }
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "run_tests",
+  "compare": "exact",
+  "reader": "junit-xml",
+  "select": "test_name"
+ },
+ "oracle": {
+  "kind": "fail-to-pass",
+  "fails_on": "buggy",
+  "passes_on": "fixed"
+ },
+ "negative_control": null,
+ "solver_input": {
+  "verb": "apply_patch",
+  "arg": "patch",
+  "variant": "buggy",
+  "probe_values": [
+   "/bench/gold.patch",
+   "/bench/empty.patch"
+  ]
+ },
+ "measure": null,
+ "predicates": [
+  {
+   "run": "git -C /work/repo rev-parse --verify {commit_hash}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /work/repo/{main_source_file}",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "build": null,
+  "run_tests": null,
+  "apply_patch": null
+ },
+ "_instance_fields": [
+  "repo_url",
+  "commit_hash",
+  "main_source_file",
+  "build_command",
+  "test_command",
+  "test_name"
+ ],
+ "_numbers_quoted": {}
+}

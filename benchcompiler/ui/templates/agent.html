@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, budget, tabbar %}
+{% block title %}{{ a.status.name }}{% endblock %}
+
+{% macro tool_call(c) -%}
+{% set args = c.args if c.args is mapping else {} %}
+{% if c.tool in ('linux_terminal', 'launch_background') and args.command %}
+  <div class="call"><span class="tname">$</span> <code class="cmd">{{ args.command|truncate(400) }}</code></div>
+{% elif c.tool == 'write_to_file' and args.path %}
+  <div class="call"><span class="tname">write</span> <code>{{ args.path }}</code> <span class="muted small">{{ (args.content or '')|length }} characters</span></div>
+{% elif c.tool == 'read_file' and args.path %}
+  <div class="call"><span class="tname">read</span> <code>{{ args.path }}</code></div>
+{% elif c.tool %}
+  <div class="call"><span class="tname">{{ c.tool }}</span>
+    {% for k, v in args.items() %}<span class="arg"><span class="muted">{{ k }}=</span>{{ (v if v is string else v|tojson)|truncate(120) }}</span>{% endfor %}</div>
+{% endif %}
+{%- endmacro %}
+
+{% block content %}
+{% set s = a.status %}
+<h1>{{ 'Search agent' if kind == 'search' else 'Construction agent' }} {{ s.name }}
+  {% if s.alive %} <a class="btn-link" href="{{ stop_url }}">Stop…</a>{% endif %}</h1>
+
+<div class="live" id="agent-status">
+<div class="stats">
+  <div class="stat"><div class="v">{{ badge(s.state) }}</div><div class="k">{{ s.reason or s.model|model }}</div></div>
+  <div class="stat"><div class="v">{{ s.cycle or '-' }}</div><div class="k">cycles</div></div>
+  <div class="stat w-budget"><div class="v">{{ s.cost|money }}</div><div class="k">of {{ s.cost_limit|money }}</div>
+    <div class="bar"><span style="width: {{ pct(s.cost, s.cost_limit) }}%"></span></div></div>
+  <div class="stat w-budget"><div class="v">{{ s.wall|dur }}</div><div class="k">of {{ s.wall_limit|dur }}</div>
+    <div class="bar"><span style="width: {{ pct(s.wall, s.wall_limit) }}%"></span></div></div>
+  {% if kind == 'search' %}<div class="stat"><div class="v">{{ a.stock_count or 0 }}</div><div class="k">candidates in its stock</div></div>{% endif %}
+  {% if kind == 'worker' %}
+    <div class="stat"><div class="v">{{ wk.summary.n_delivered }}</div><div class="k">delivered</div></div>
+    <div class="stat"><div class="v">{{ wk.summary.n_dropped }}</div><div class="k">dropped</div></div>
+    <div class="stat"><div class="v">{{ wk.summary.registered }}{% if wk.summary.pool %}<span class="muted"> / {{ wk.summary.pool }}</span>{% endif %}</div><div class="k">candidates taken / handed over</div></div>
+    {% if wk.summary.current and s.alive %}<div class="stat"><div class="v small-v" title="{{ wk.summary.current.key }}">{{ wk.summary.current.key|key }}</div><div class="k">working on · {{ wk.summary.current.state|state }}</div></div>{% endif %}
+  {% endif %}
+  <div class="stat"><div class="v">{{ s.last_activity|ago }}</div><div class="k">last activity</div></div>
+</div>
+</div>
+
+{% if kind == 'worker' %}
+{{ tabbar([('candidates', 'Candidates', wk['items']|length), ('activity', 'Activity', none), ('records', 'Records', none)], tab) }}
+{% else %}
+{{ tabbar([('activity', 'Activity', none), ('stock', 'Candidates', a.stock_count or 0), ('records', 'Records', none)], tab) }}
+{% endif %}
+
+{% if tab == 'candidates' and kind == 'worker' %}
+<div class="live" id="worker-candidates">
+<table class="dense">
+  <thead><tr><th>candidate</th><th>state</th><th>replay checks</th><th>why dropped</th></tr></thead>
+  <tbody>
+  {% for i in wk['items']|reverse %}
+  {% set rc = wk.recipes.get(i.recipe) if i.recipe else none %}
+  <tr>
+    <td class="nowrap" title="{{ i.key }}">{{ i.key|key }}</td>
+    <td>{% if i.state in wk.summary.terminal %}{{ badge('delivered') }}{% elif i.state == 'REJECTED' %}{{ badge('dropped') }}{% else %}<span class="badge running">{{ i.state|state }}</span>{% endif %}</td>
+    <td class="nowrap">{% if rc %}<a href="{{ base }}/recipe/{{ i.recipe }}">{{ rc.checks|length }} check{{ '' if rc.checks|length == 1 else 's' }}</a>
+        {% set last = rc.checks[-1] if rc.checks else none %}
+        {% if last %}· last {{ badge('ok' if last.ok else 'failed') }}{% for name, ok in last.rows if not ok %} <code>{{ name }}</code>{% endfor %}{% endif %}
+      {% else %}<span class="muted">no check yet</span>{% endif %}</td>
+    <td class="small">{% if i.reason %}{% if i.reason|length > 220 %}<details class="inline" id="why-{{ loop.index }}"><summary>{{ i.reason|truncate(200) }}</summary><div class="prose">{{ i.reason }}</div></details>{% else %}{{ i.reason }}{% endif %}{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="4" class="empty">No candidate taken yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% elif tab == 'activity' %}
+<p class="muted small">Newest first. A cycle's number opens the exact prompt the model saw.
+  Show <a href="?tab=activity&n=25">25</a> · <a href="?tab=activity&n=100">100</a> · <a href="?tab=activity&n=200">200</a></p>
+<div class="live" id="agent-cycles">
+{% for c in cycles %}
+<div class="cycle">
+  <div class="head"><a href="{{ base }}/cycle/{{ c.cycle }}">cycle {{ c.cycle }}</a>
+    <span>{{ c.ts|ago }}</span><span>{{ c.cost|money }}</span>
+    {% if c.candidate and kind == 'worker' and (loop.first or c.candidate != loop.previtem.candidate) %}<span class="badge" title="{{ c.candidate }}">{{ c.candidate|key }}</span>{% endif %}
+    {% if c.notes %}<span class="badge warn">{{ c.notes|join(', ') }}</span>{% endif %}
+    {% if c.ok == false %}<span class="badge failed">tool failed</span>{% endif %}</div>
+  {% if c.thoughts %}<div class="thought">{{ c.thoughts|truncate(500) }}</div>{% endif %}
+  {{ tool_call(c) }}
+  <div class="more">
+  {% if c.result %}<details class="inline" id="res-{{ c.cycle }}"><summary>result</summary><pre>{{ c.result|truncate(6000) }}</pre></details>{% endif %}
+  {% if c.raw %}<details class="inline" id="raw-{{ c.cycle }}"><summary>model reply as sent</summary><pre>{{ c.raw }}</pre></details>{% endif %}
+  </div>
+</div>
+{% else %}<p class="empty">No cycle recorded yet.</p>{% endfor %}
+</div>
+
+{% elif tab == 'stock' %}
+{% include "cand_table.html" %}
+
+{% elif tab == 'records' %}
+<div class="kv">
+  <div class="k">model</div><div class="v"><code>{{ s.model or '-' }}</code></div>
+  <div class="k">directory</div><div class="v"><code>{{ s.dir }}</code></div>
+  <div class="k">prompts kept</div><div class="v">{{ a.n_cycle_files }} cycles</div>
+</div>
+{% if a.instance %}<details><summary>Its task (instances.jsonl)</summary><pre>{{ a.instance|tojson_pretty }}</pre></details>{% endif %}
+{% if a.overrides %}<details><summary>Launch overrides (budgets, model)</summary><pre>{{ a.overrides }}</pre></details>{% endif %}
+{% if a.check_script %}<details><summary>Its existence-check script (stock/check.sh)</summary><pre>{{ a.check_script }}</pre></details>{% endif %}
+<details><summary>Process log (end of construct.log)</summary><pre>{{ a.log_tail }}</pre></details>
+{% endif %}
+{% endblock %}

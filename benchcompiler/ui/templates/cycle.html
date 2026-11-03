@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}cycle {{ c.cycle }}{% endblock %}
+{% block content %}
+<h1>Cycle {{ c.cycle }}</h1>
+<p class="sub"><a href="{{ base }}/cycle/{{ c.cycle - 1 }}">← cycle {{ c.cycle - 1 }}</a> ·
+  <a href="{{ base }}/cycle/{{ c.cycle + 1 }}">cycle {{ c.cycle + 1 }} →</a></p>
+
+{% set s = c.summary %}
+{% if s %}
+<h2>What the model did</h2>
+<div class="kv">
+  <div class="k">when</div><div class="v">{{ s.ts|when }}</div>
+  <div class="k">cost</div><div class="v">{{ s.cost|money }}</div>
+  {% if s.candidate %}<div class="k">candidate</div><div class="v">{{ s.candidate }}</div>{% endif %}
+  {% if s.stage %}<div class="k">stage</div><div class="v">{{ s.stage }}</div>{% endif %}
+  <div class="k">tool</div><div class="v"><code>{{ s.tool or '-' }}</code></div>
+</div>
+{% if s.thoughts %}<h3>Thoughts</h3><pre>{{ s.thoughts }}</pre>{% endif %}
+{% if s.args %}<h3>Arguments</h3><pre>{{ s.args|tojson_pretty }}</pre>{% endif %}
+{% if s.result %}<h3>Result</h3><pre>{{ s.result }}</pre>{% endif %}
+{% endif %}
+
+<h2>The prompt the model saw</h2>
+{% if c.messages %}
+  {% for m in c.messages %}
+  <details class="msg {{ m.role }}" id="m-{{ loop.index }}" {% if loop.last %}open{% endif %}>
+    <summary><span class="role">{{ m.role }}</span> <span class="muted">{{ (m.content|string)|length }} characters</span></summary>
+    <pre>{{ m.content }}</pre>
+  </details>
+  {% endfor %}
+{% else %}<p class="empty">No prompt was kept for this cycle.</p>{% endif %}
+
+<details><summary>Every recorded event of this cycle ({{ c.events|length }})</summary>
+  {% for e in c.events %}<pre>{{ e|tojson_pretty }}</pre>{% endfor %}</details>
+{% endblock %}

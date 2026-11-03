@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "macros.html" import run_cards %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<div class="split">
+<section>
+  <h1>Tasks</h1>
+  <p class="sub">Each task through the four phases. Click a task to open it.</p>
+  <table class="phasegrid">
+    <thead><tr><th>task</th><th><span class="n">1</span> search rules</th><th><span class="n">2</span> search</th>
+      <th><span class="n">3</span> construction</th><th><span class="n">4</span> packaged</th></tr></thead>
+    <tbody>
+    {% for t in tasks %}
+    <tr>
+      <td><a class="taskname" href="/task/{{ t.task }}">{{ t.task }}</a></td>
+      <td>{% if t.rules %}<a href="/task/{{ t.task }}?tab=rules"><span class="badge ok">{{ t.rules|lower }}</span></a>{% else %}<span class="badge">none</span>{% endif %}</td>
+      <td><a href="/task/{{ t.task }}?tab=search">{{ t.campaigns }} campaign{{ '' if t.campaigns == 1 else 's' }}</a>
+        {% if t.search_running %}<span class="badge running">{{ t.search_running }} running</span>{% endif %}
+        <div class="muted small">frozen: {% for st in t.stocks %}{{ st.count }}{{ ' + ' if not loop.last }}{% else %}none{% endfor %}</div></td>
+      <td><a href="/task/{{ t.task }}?tab=construction">{{ t.construction_runs }} run{{ '' if t.construction_runs == 1 else 's' }}</a>
+        {% if t.workers_running %}<span class="badge running">{{ t.workers_running }} running</span>{% endif %}
+        <div class="muted small">{{ t.delivered }} delivered · {% if t.plan %}<a href="/task/{{ t.task }}?tab=plan">plan</a>{% else %}no plan{% endif %}</div></td>
+      <td>{% for b in t.benchmarks %}<a href="/benchmarks/{{ b.set }}/{{ b.task }}">{{ b.set }} <b>{{ b.count }}</b></a>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">none yet</span>
+        {% if t.delivered %}<div class="small"><span class="badge warn">{{ t.delivered }} delivered, not packaged</span></div>{% endif %}{% endfor %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% if not static_export %}<aside>
+  <h1>Running now</h1>
+  <div class="live" id="run-total">
+  {% if live %}<p class="sub">{{ live|length }} agent{{ '' if live|length == 1 else 's' }} ·
+    {{ live|map(attribute='cost')|select|sum|money }} spent so far · <a href="/running">details</a></p>{% endif %}
+  </div>
+  {{ run_cards(groups) }}
+</aside>{% endif %}
+</div>
+{% endblock %}

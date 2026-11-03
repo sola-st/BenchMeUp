@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Workflow · {{ task }}{% endblock %}
+{% block content %}
+<h1>Workflow</h1>
+<p class="sub">The steps from a task description to a certified benchmark. Colours show where the chosen task stands;
+  each box names the command that runs the step and what it writes. Click a box to open its page.</p>
+<nav class="tabs">{% for t in tasks %}<a href="?task={{ t }}" class="{{ 'on' if t == task }}">{{ t }}</a>{% endfor %}</nav>
+<p class="legend small"><span class="dot done"></span>done <span class="dot running"></span>running
+  <span class="dot waiting"></span>waiting on the step before <span class="dot todo"></span>not started</p>
+<div class="live" id="pipe">
+<div class="pipe-scroll">
+<div class="pipe" style="width: {{ p.width }}px; height: {{ p.height }}px">
+  <svg class="pipe-edges" width="{{ p.width }}" height="{{ p.height }}" aria-hidden="true">
+    <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="ah"></path></marker></defs>
+    {% for d in p.edges %}<path d="{{ d }}" marker-end="url(#ah)"></path>{% endfor %}
+  </svg>
+  {% for n in p.nodes %}
+  <a class="pnode st-{{ n.status }}" href="{{ n.url }}" style="left: {{ n.x|round|int }}px; top: {{ n.y|round|int }}px; width: {{ n.w|round|int }}px; height: {{ n.h }}px">
+    <div class="pn-head">{% if n.n %}<span class="n">{{ n.n }}</span>{% endif %}{{ n.title }}<span class="dot {{ n.status }}"></span></div>
+    {% if n.name %}<div class="pn-name" title="{{ n.name }}">{{ n.name }}</div>{% endif %}
+    <div class="pn-v">{{ n.value }}</div>
+    {% for f in n.facts %}<div class="pn-s">{{ f }}</div>{% endfor %}
+    {% if n.cmd %}<div class="pn-cmd"><code>{{ n.cmd }}</code></div>{% endif %}
+    {% if n.out %}<div class="pn-out" title="writes {{ n.out }}">→ {{ n.out }}</div>{% endif %}
+  </a>
+  {% endfor %}
+</div>
+</div>
+</div>
+<p class="muted small">Steps 1-2 run once per task (the formalizer and the generators use a model); the search and the
+  construction run as campaigns of agents; packaging and certification use no model. Stage counts add up every
+  construction run and every model (the task's Funnel tab splits them by model).</p>
+{% endblock %}

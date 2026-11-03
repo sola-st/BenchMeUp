@@ -1,0 +1,15 @@
+# Deliberately vague first draft — from spec/example-walkthrough.md round 1.
+# Expected: REJECT. A human would write exactly this on a first attempt.
+
+task: Decide whether a given test in a project is flaky.
+instance: |
+  input: a project and a test
+  expected output: flaky or not flaky
+data: |
+  Tests from popular open-source Python projects on GitHub.
+correctness: |
+  The label should match whether the test is actually flaky.
+interface: |
+  CLI that takes a test id and returns the verdict.
+scale: |
+  Enough tests to be useful.

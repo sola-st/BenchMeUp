@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}{{ set_ }} / {{ task }}{% endblock %}
+{% block content %}
+<h1>{{ b.name or task }} <span class="muted">({{ set_ }})</span></h1>
+{% set acc = b.instances|selectattr('accepted', 'equalto', true)|list|length %}
+{% set failed = b.instances|selectattr('accepted', 'equalto', false)|list|length %}
+{% set counted = b.instances|selectattr('counted')|list|length %}
+<div class="stats">
+  <div class="stat"><div class="v">{{ b.count }}</div><div class="k">packaged</div></div>
+  <div class="stat"><div class="v">{{ acc }}</div><div class="k">accepted on re-execution</div></div>
+  <div class="stat"><div class="v">{{ failed }}</div><div class="k">failed acceptance</div></div>
+  <div class="stat"><div class="v">{{ counted }}</div><div class="k">counted</div></div>
+</div>
+{% if b.selection_rule %}<p class="muted">Counted: {{ b.selection_rule }}</p>{% endif %}
+
+<div class="toolbar"><input type="search" placeholder="filter: repository, commit, verdict…" data-filter="insts">
+  <span class="muted" id="insts-count">{{ b.count }} instances</span></div>
+<div class="scroll"><table id="insts">
+  <thead><tr><th>instance</th><th>verdict rows</th><th>accepted</th><th>counted</th></tr></thead>
+  <tbody>
+  {% for i in b.instances %}
+  <tr>
+    <td class="wrap"><a href="/benchmarks/{{ set_ }}/{{ task }}/{{ i.id }}">{{ i.id|short(90) }}</a></td>
+    <td>{% for name, ok in i.rows.items() %}<span class="badge {{ 'ok' if ok else 'bad' }}" title="{{ name }}">{{ name }}</span> {% endfor %}</td>
+    <td>{% if i.accepted is none %}<span class="muted">-</span>{% else %}{{ badge('ok' if i.accepted else 'bad') }}{% endif %}</td>
+    <td>{% if i.counted %}✓{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+
+{% if b.excluded %}<h2>Excluded</h2>{% for e in b.excluded %}<p><b>{{ e.id|short(90) }}</b>: {{ e.reason }}</p>{% endfor %}{% endif %}
+{% if b.certify_records %}<p class="muted">Certification records: {{ b.certify_records|join(', ') }}</p>{% endif %}
+{% if b.readme %}<details><summary>The benchmark's README</summary><pre>{{ b.readme }}</pre></details>{% endif %}
+{% endblock %}

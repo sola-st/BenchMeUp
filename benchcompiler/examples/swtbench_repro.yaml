@@ -1,0 +1,140 @@
+# Target technique/benchmark: SWT-Bench (NeurIPS 2024). Published: SWE-Agent+
+# 18.5% success rate on SWT-Bench Lite (n=276, best of the techniques reported).
+
+task: |
+  Given a real GitHub issue and the project's codebase at the commit where the issue was
+  filed, an automated technique attempts to generate a test that reproduces the bug
+  described in the issue.
+
+instance: |
+  input: issue text and a repository snapshot at the pre-fix commit
+  expected output: a test (file or function) to add to the project's test suite
+
+data: |
+  Real, public Python projects with an issue tracker and pull requests. ONE instance = ONE
+  merged pull request, identified by {repository URL, the commit that merged it}. Candidate =
+  a merged pull request that closes an issue and, in the same PR, adds or modifies a test: that
+  test fails when run against the commit before the PR was merged and passes when run against
+  the commit that merged it.
+
+  HOW THE PULL REQUEST WAS MERGED DOES NOT MATTER, and the instance must not require one style
+  over another. GitHub offers three merge buttons and projects differ: a merge commit has two
+  parents, the PR's work on the second; a squash merge and a rebase merge land the PR as ONE
+  ORDINARY COMMIT with a single parent. All three are valid candidates here. In every case the
+  merging commit is the postfix side and its FIRST PARENT is the base commit, which is the
+  prefix side -- for a squashed or rebased PR the first parent is simply its only parent. Do
+  not require the merging commit to have a second parent: that clause alone excludes every
+  project that squashes, which is a large share of the Python ecosystem. The two commits are recorded
+  under the names merge_commit (the commit that merged the pull request) and base_commit
+  (its first parent), whichever of the three merge styles produced them.
+
+correctness: |
+  Apply the submitted test to the pre-fix repository snapshot: it must fail. Apply it to the
+  post-fix snapshot (the real fix applied): it must pass.
+
+interface: |
+  Each instance packaged in SWE-bench's instance shape (repo, base_commit, patch, test_patch,
+  problem_statement, FAIL_TO_PASS).
+
+  WHAT THE BUILDER DELIVERS -- one instance is one directory of files:
+  - instance.json: repo_url, merge_commit (the identity), base_commit (the commit before the
+    pull request merged), test_name (the PR's test, as the test runner names it),
+    problem_statement (the issue text), and builder_notes.
+  - Dockerfile: Python and the project's dependencies. setup.sh: fetches both commits into
+    /work/repo.
+  - Two versions, each in its own directory by checkout.sh <dir> <commit>, apply_patch.sh <dir>
+    <patch> where needed, and install.sh <dir>: `prefix` is the base commit with the PR's test
+    changes applied (test_patch.patch), installed; `postfix` is the merge commit, installed.
+  - run_tests.sh <dir>: runs the PR's test in <dir> and prints the test runner's JUnit XML report
+    on stdout, unmodified, exiting 0 whether it passes or fails. The builder may add further
+    check scripts; every one it declares is run and read.
+  - test_patch.patch (the PR's test changes), fix.patch (the PR's non-test changes) and
+    empty.patch: the PR's test and the empty patch are the two answers the harness tries on
+    `prefix` (the PR's test must fail there and pass on `postfix`, the empty patch must not);
+    revert_fix.sh <dir> reverts the fix in the `postfix` tree so the test must fail again.
+  - What the checks read: the named test's outcome in the JUnit report, and the exit status of
+    any further check script.
+
+scale: |
+  First pass: ~15-20 instances.
+
+criteria: |
+  - real merged pull request that closes a reported issue, merged in any of the three ways
+    GitHub offers (merge commit, squash, rebase); the merging commit's first parent is the
+    base commit in all three, and a single-parent merging commit is normal, not a defect
+  - the PR's own added/modified test fails on the pre-fix commit and passes on the PR's
+    merge commit, confirmed by an actual test run
+  - both the pre-fix and post-fix snapshots build/install and run their test suite
+
+  - the builder verifies itself, by running it on its own machine, that the PR's test fails on
+    the prefix version and passes on the postfix version, and that the PR changes non-test
+    source; it records the test's id and its judgment in builder_notes
+  - done means: the harness ran every script on a blank machine without a crash, and the builder
+    has verified the points above itself and written what it verified, with the numbers and the
+    reason for anything it accepted against the harness's observations, into instance.json under
+    builder_notes. The harness reports what it observed; the builder judges.
+
+constraints: |
+  - Python projects only
+  - project must NOT be one of the 12 repos SWE-bench/SWT-Bench already use: astropy/astropy,
+    django/django, matplotlib/matplotlib, mwaskom/seaborn, pallets/flask, psf/requests,
+    pydata/xarray, pylint-dev/pylint, pytest-dev/pytest, scikit-learn/scikit-learn,
+    sphinx-doc/sphinx, sympy/sympy
+
+# Source PROPERTIES only, never named repos (the sampler decides where to mine). Lifted
+# verbatim from the agreed set in lead_prospector_swtbench/agent.yaml (commit 7746fb5):
+# the task mines merged PRs that close issues and change tests, so the clauses count the
+# very thing being mined (merged PRs linked to issues), countable before any clone.
+admissibility:
+  - name: language
+    observe: "GET https://api.github.com/repos/{org}/{project} -> language"
+    require: "one of [python]"
+  - name: commit_count
+    # ONE procedure, not two. This said "in a shallow clone, or the contributors API": two
+    # ways to obtain one number, and nothing recorded which was used -- so `>= 1000` meant
+    # something different depending on who ran it, and a shallow clone returns 1. The wording
+    # below is what the boca family already stated for the same field.
+    observe: "git rev-list --count HEAD in a full clone"
+    require: ">= 500"
+  - name: has_issues
+    observe: "GET https://api.github.com/repos/{org}/{project} -> has_issues"
+    require: "is true"
+  - name: merged_prs_closing_issues
+    observe: "GET https://api.github.com/search/issues?q=repo:{org}/{project}+is:pr+is:merged+linked:issue -> total_count"
+    require: ">= 20"
+  - name: stars
+    observe: "GET https://api.github.com/repos/{org}/{project} -> stargazers_count"
+    require: ">= 100"
+  - name: last_commit
+    observe: "GET https://api.github.com/repos/{org}/{project} -> pushed_at (YYYY-MM-DD)"
+    require: "within 12 months"
+  - name: is_fork
+    observe: "GET https://api.github.com/repos/{org}/{project} -> fork"
+    require: "is false"
+
+artifact_variants:
+  - name: prefix
+    description: "the repository snapshot at the pre-fix commit (the commit before the PR merged), installed with its test suite runnable, with the PR's own added/modified test applied. The check runs that test and passes only if it FAILS here -- the issue is reproducible"
+    check_cmd: "sh run_tests.sh ."
+    expect: pass
+    results: junit-xml
+    expect_failures: 1
+  - name: postfix
+    description: "the repository snapshot at the PR's merge commit (the real fix applied), installed with its test suite runnable. The check runs the same test and passes only if it PASSES here"
+    check_cmd: "sh run_tests.sh ."
+    expect: pass
+    results: junit-xml
+    expect_failures: 0
+
+solver_input:
+  kind: workdir
+  path: "{clone_path}"
+  describes: "the solver writes a test into the checked-out tree that reproduces the reported issue"
+
+negative_control:
+  break_cmd: corruption_cmd
+  # `postfix`, not `fixed`: `fixed` is a defects4j variant name and this contract has no such
+  # variant. The packager builds the rebuild/check verb pair from this word, so the wrong one
+  # was only discovered at packaging, an epoch after construction paid for it.
+  check: postfix
+  describes: "revert the fix in the working tree so the reproducing test must stop passing"

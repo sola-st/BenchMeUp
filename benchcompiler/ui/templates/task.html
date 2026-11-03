@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, tabbar, build_row %}
+{% block title %}{{ task }}{% endblock %}
+{% block content %}
+<h1>{{ task }}</h1>
+<p class="sub">{{ (spec.fields.task or '')|trim|truncate(260) }}</p>
+{% set running_s = campaigns|sum(attribute='running') %}
+{% set running_c = runs|sum(attribute='running') %}
+{% set n_delivered = distinct(runs) %}
+{{ tabbar([('overview', 'Overview', none), ('funnel', 'Funnel', none), ('spec', 'Specification', none), ('rules', '1 · Search rules', none),
+           ('search', '2 · Search', campaigns|length), ('plan', '3 · Construction plan', none),
+           ('construction', '3 · Construction', runs|length), ('benchmarks', '4 · Packaged', benchmarks|length), ('drops', 'Why dropped', none), ('actions', 'Actions', none)], tab) }}
+
+{% if tab == 'overview' %}
+<div class="phase-strip">
+  <a class="phase" href="?tab=rules">
+    <div class="ph-n">1</div><div class="ph-t">Search rules</div>
+    <div>{% if rules.outcome %}{{ badge(rules.outcome|lower) }}{% else %}<span class="badge">none</span>{% endif %}</div>
+    <div class="muted small">identity: {{ (rules.brief.identity_fields or [])|join(', ') or '-' }}</div>
+  </a>
+  <a class="phase" href="?tab=search">
+    <div class="ph-n">2</div><div class="ph-t">Search</div>
+    <div><b>{{ campaigns|length }}</b> campaigns{% if running_s %} · {{ badge('running') }} {{ running_s }}{% endif %}</div>
+    <div class="muted small">frozen: {% for st in stocks %}{{ st.name }} {{ st.count }}{{ ', ' if not loop.last }}{% else %}nothing{% endfor %}</div>
+  </a>
+  <a class="phase" href="?tab=construction">
+    <div class="ph-n">3</div><div class="ph-t">Construction</div>
+    <div><b>{{ runs|length }}</b> runs{% if running_c %} · {{ badge('running') }} {{ running_c }}{% endif %}</div>
+    <div><b>{{ n_delivered }}</b> distinct candidates delivered</div>
+    <div class="muted small">{% if plan.exists %}plan: {{ plan.stages|length }} stages, oracle {{ plan.oracle.kind }}{% else %}no plan{% endif %}</div>
+  </a>
+  <a class="phase" href="?tab=benchmarks">
+    <div class="ph-n">4</div><div class="ph-t">Packaged</div>
+    <div>{% for b in benchmarks %}{{ b.set }} <b>{{ b.count }}</b>{{ ' · ' if not loop.last }}{% else %}nothing packaged yet{% endfor %}</div>
+    {% if not benchmarks and n_delivered %}<div><span class="badge warn">{{ n_delivered }} delivered, waiting to be packaged</span></div>{% endif %}
+  </a>
+</div>
+<div class="split even">
+  <section>
+    <h2>Latest search campaigns</h2>
+    {% for c in (campaigns|reverse|list)[:4] %}
+      <p><a href="/search/{{ task }}/{{ c.epoch }}">{{ c.epoch }}</a> · {{ c.agents }} agents · {{ c.candidates }} candidates · {{ c.cost|money }}
+        {% if c.running %}{{ badge('running') }}{% elif c.marker %}{{ badge(c.marker|lower) }}{% endif %} <span class="muted small">{{ c.started|when }}</span></p>
+    {% else %}<p class="empty">None.</p>{% endfor %}
+  </section>
+  <section>
+    <h2>Latest construction runs</h2>
+    {% for r in (runs|sort(attribute='started', reverse=true)|list)[:4] %}
+      <p><a href="/construction/{{ r.key }}">{{ r.label }}</a> · {{ r.workers }} agents · {{ r.delivered }} delivered · {{ r.cost|money }}
+        {% if r.running %}{{ badge('running') }}{% endif %} <span class="muted small">{{ r.started|when }}</span></p>
+    {% else %}<p class="empty">None.</p>{% endfor %}
+  </section>
+</div>
+
+{% elif tab == 'funnel' %}
+<form class="toolbar" method="get">
+  <input type="hidden" name="tab" value="funnel">
+  <label class="muted" for="run-pick">construction runs</label>
+  <select id="run-pick" name="run" onchange="this.form.submit()">
+    <option value="">all {{ runs|length }} runs, one row per model</option>
+    {% for r in runs|sort(attribute='started', reverse=true) %}
+    <option value="{{ r.key }}" {{ 'selected' if r.key == run }}>{{ r.label }}{{ ' (running)' if r.running }}</option>
+    {% endfor %}
+  </select>
+</form>
+<div class="live" id="task-flow">
+<div class="lane-body">
+  <a class="node p2 search-node" href="?tab=search">
+    <div class="node-k"><span class="n">2</span> search{% if running_s %} <span class="badge running">{{ running_s }} now</span>{% endif %}</div>
+    <div class="node-v">{{ stocks|sum(attribute='count') }}<span class="muted"> / {{ campaigns|sum(attribute='candidates') }}</span></div>
+    <div class="node-s">frozen / found in {{ campaigns|length }} campaigns</div>
+    <div class="node-s">rules {% if rules.outcome %}{{ badge(rules.outcome|lower) }}{% else %}none{% endif %}</div>
+  </a>
+  <div class="arrow">→</div>
+  <div class="builds">
+  {% for g in builds %}{{ build_row(task, g, detail=true) }}{% else %}<p class="empty">No construction run.</p>{% endfor %}
+  </div>
+</div>
+</div>
+<p class="muted small">Stage counts: a candidate entered a stage when it passed the one before; "unfinished" means it was
+  still on that stage when its run ended or moved on. Each row counts only its model's runs; a candidate handed to two runs of that model counts in both.
+  Bar: <span class="t-pass">passed</span> · <span class="t-drop">dropped</span> · <span class="t-open">unfinished</span>.</p>
+
+{% elif tab == 'drops' %}{% include "_drops.html" %}
+{% elif tab == 'actions' %}{% include "_actions.html" %}
+{% elif tab == 'spec' %}{% include "_spec.html" %}
+{% elif tab == 'rules' %}{% include "_rules.html" %}
+{% elif tab == 'plan' %}{% include "_plan.html" %}
+
+{% elif tab == 'search' %}
+<h2>Search campaigns</h2>
+{% if campaigns %}
+<table class="dense">
+  <thead><tr><th>campaign</th><th>model</th><th class="num">agents</th><th>state</th><th class="num">candidates</th>
+    <th class="num">cost</th><th>started</th></tr></thead>
+  <tbody>
+  {% for c in campaigns|reverse %}
+  <tr>
+    <td><a href="/search/{{ task }}/{{ c.epoch }}">{{ c.epoch }}</a></td>
+    <td class="muted">{{ c.model|model }}</td>
+    <td class="num">{{ c.agents }}</td>
+    <td>{% if c.running %}{{ badge('running') }} {{ c.running }}{% elif c.marker %}{{ badge(c.marker|lower) }}{% else %}{{ badge('ended') }}{% endif %}</td>
+    <td class="num">{{ c.candidates }}</td>
+    <td class="num">{{ c.cost|money }}</td>
+    <td class="muted nowrap">{{ c.started|when }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted small">Candidates: what is in the agents' stock files, before freezing (not deduplicated).</p>
+{% else %}<p class="empty">No search campaign in the runs folder.</p>{% endif %}
+<h2>Frozen stocks</h2>
+{% if stocks %}
+<table class="dense">
+  <thead><tr><th>stock</th><th class="num">candidates</th><th>identity</th><th>frozen</th></tr></thead>
+  <tbody>
+  {% for s in stocks %}
+  <tr><td><a href="/candidates/stock/{{ s.name }}">{{ s.name }}</a></td><td class="num">{{ s.count }}</td>
+    <td class="muted">{{ (s.identity or [])|join(', ') }}</td><td class="muted nowrap">{{ s.frozen_at|when }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No frozen stock.</p>{% endif %}
+
+{% elif tab == 'construction' %}
+<h2>Construction runs</h2>
+{% if runs %}
+<table class="dense">
+  <thead><tr><th>run</th><th>model</th><th class="num">agents</th><th>state</th><th class="num">delivered</th>
+    <th class="num">dropped</th><th class="num">cost</th><th>started</th></tr></thead>
+  <tbody>
+  {% for r in runs|sort(attribute='started', reverse=true) %}
+  <tr>
+    <td><a href="/construction/{{ r.key }}">{{ r.label }}</a></td>
+    <td class="muted">{{ r.model|model }}</td>
+    <td class="num">{{ r.workers }}</td>
+    <td>{% if r.running %}{{ badge('running') }} {{ r.running }}{% else %}{{ badge('ended') }}{% endif %}</td>
+    <td class="num">{{ r.delivered }}</td><td class="num">{{ r.dropped }}</td>
+    <td class="num">{{ r.cost|money }}</td><td class="muted nowrap">{{ r.started|when }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No construction run in the runs folder.</p>{% endif %}
+
+{% elif tab == 'benchmarks' %}
+<h2>Packaged benchmarks</h2>
+{% if benchmarks %}
+<table class="dense"><thead><tr><th>set</th><th class="num">instances</th></tr></thead><tbody>
+{% for b in benchmarks %}<tr><td><a href="/benchmarks/{{ b.set }}/{{ b.task }}">{{ b.set }}</a></td><td class="num">{{ b.count }}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="empty">Nothing packaged for this task.{% if n_delivered %} Construction runs delivered {{ n_delivered }} distinct candidates that are not packaged yet.{% endif %}</p>{% endif %}
+{% endif %}
+{% endblock %}
