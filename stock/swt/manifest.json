@@ -1,0 +1,12 @@
+{
+ "identity": [
+  "repo_url",
+  "merge_commit"
+ ],
+ "normalize": {
+  "repo_url": "git_url",
+  "merge_commit": "full_sha"
+ },
+ "count": 206,
+ "agent_dir": "agents/swt_search"
+}

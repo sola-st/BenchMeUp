@@ -1,0 +1,282 @@
+{
+ "verbs": {
+  "checkout": {
+   "args": [
+    "dir",
+    "commit"
+   ]
+  },
+  "apply_patch": {
+   "args": [
+    "dir",
+    "patch"
+   ]
+  },
+  "build": {
+   "args": [
+    "dir"
+   ]
+  },
+  "run_tests": {
+   "args": [
+    "dir"
+   ]
+  },
+  "check_all": {
+   "args": [
+    "dir"
+   ]
+  },
+  "revert_fix": {
+   "args": [
+    "dir"
+   ]
+  }
+ },
+ "variants": {
+  "buggy": {
+   "setup": [
+    {
+     "verb": "checkout",
+     "args": {
+      "commit": "{buggy_commit}"
+     }
+    },
+    {
+     "verb": "apply_patch",
+     "args": {
+      "patch": "/bench/test.patch"
+     }
+    },
+    {
+     "verb": "build",
+     "args": {}
+    }
+   ]
+  },
+  "fixed": {
+   "setup": [
+    {
+     "verb": "checkout",
+     "args": {
+      "commit": "{fix_commit_hash}"
+     }
+    },
+    {
+     "verb": "build",
+     "args": {}
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "run_tests",
+  "compare": "exact",
+  "reader": "junit-xml",
+  "select": "{triggering_tests}"
+ },
+ "checks": [
+  {
+   "verb": "run_tests",
+   "compare": "exact",
+   "reader": "junit-xml",
+   "select": "{triggering_tests}"
+  },
+  {
+   "verb": "check_all",
+   "compare": "exact",
+   "reader": "exit-code",
+   "select": null
+  }
+ ],
+ "oracle": {
+  "kind": "fail-to-pass",
+  "fails_on": "buggy",
+  "passes_on": "fixed"
+ },
+ "negative_control": {
+  "verb": "revert_fix",
+  "variant": "fixed",
+  "expect": "observable_changes",
+  "then": null
+ },
+ "solver_input": {
+  "verb": "apply_patch",
+  "arg": "patch",
+  "variant": "buggy",
+  "probe_values": [
+   "/bench/fix.patch",
+   "/bench/empty.patch"
+  ]
+ },
+ "measure": null,
+ "predicates": [
+  {
+   "run": "git -C /work/repo rev-parse --verify {fix_commit_hash}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "git -C /work/repo rev-parse --verify {buggy_commit}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test \"$(git -C /work/repo rev-parse {fix_commit_hash}^1)\" = \"$(git -C /work/repo rev-parse {buggy_commit})\"",
+   "require": "exit zero"
+  },
+  {
+   "run": "git -C /work/repo show --stat {fix_commit_hash} | grep -q .",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "checkout": "create <dir> as a working tree of /work/repo checked out at <commit> (git worktree or clone plus checkout); exit 0",
+  "apply_patch": "apply the unified diff <patch> (a path under /bench, possibly empty) to <dir> with git apply; exit 0 on success, nonzero if it does not apply",
+  "build": "compile <dir>'s main and test sources with the project's build tool (offline-friendly, skipping test execution); exit 0 when it built (its output is not read)",
+  "run_tests": "run only the triggering tests named in /bench/instance.json in <dir> and print the build tool's JUnit XML report on stdout, unmodified and nothing else; exit 0 whether they pass or fail",
+  "check_all": "run <dir>'s whole test suite and exit 0 when no test outside known_failing_tests in /bench/instance.json failed, nonzero when a new failure appeared; stdout is not read as a report",
+  "revert_fix": "apply the reverse of /bench/fix.patch to <dir> and rebuild it so the fixed non-test source is gone and the triggering tests must fail again; exit 0"
+ },
+ "_stages": [
+  {
+   "name": "pick the bug commit's fields, install the JDK and clone both revisions",
+   "files": [
+    "Dockerfile",
+    "setup.sh",
+    "instance.json"
+   ],
+   "goal": "The search hands you only repo_clone_url and fix_commit_hash; everything else you must establish. Read the commit (git show, its message, linked issue or merged PR) and confirm it is a real bug fix, not a refactor or feature. Split its diff: files under the project's declared test source root (src/test/, or whatever the pom/build.xml declares) are the TEST part, everything else is the FIX part -- never judge by the word 'test' in a filename (LatestVersion.java is production source), and a commit whose whole diff is test files is NOT a candidate, abandon it. Record buggy_commit = the fix commit's first parent, triggering_tests = the ids of the tests the commit adds or modifies exactly as the build tool names them (e.g. org.foo.BarTest#baz), build_tool, and leave known_failing_tests to fill in later. Dockerfile installs the JDK version this project actually needs plus Maven/Gradle/Ant (no source, no build); setup.sh clones repo_clone_url into /work/repo fetching enough history that both commits and their trees exist.",
+   "done_when": "the image builds, setup.sh exits 0, instance.json carries repo_clone_url, fix_commit_hash, buggy_commit (verified to be the fix commit's parent), triggering_tests and build_tool, and the identity predicates hold in the fresh clone",
+   "verbs": [],
+   "rows": [
+    "replays",
+    "identity"
+   ]
+  },
+  {
+   "name": "split the commit into fix.patch and test.patch and build both trees",
+   "files": [
+    "checkout.sh",
+    "apply_patch.sh",
+    "build.sh",
+    "fix.patch",
+    "test.patch",
+    "empty.patch"
+   ],
+   "goal": "Write fix.patch (the non-test files of the fix commit's diff) and test.patch (the test files), both as unified diffs that git apply accepts against the parent tree, plus an empty.patch that applies cleanly and changes nothing. fix.patch must be non-empty and must touch non-test source. checkout.sh makes a working tree at an arbitrary directory name -- never assume a path. build.sh must compile main and test sources without running tests and must work offline-ish: pre-warm dependencies in the Dockerfile if the network is slow, and pin any wrapper the project uses.",
+   "done_when": "both variants check out, apply their patch and build in a fresh container; fix.patch applies to the buggy tree and empty.patch applies as a no-op",
+   "verbs": [
+    "checkout",
+    "apply_patch",
+    "build"
+   ],
+   "rows": [
+    "variants_build"
+   ]
+  },
+  {
+   "name": "write the triggering-test runner, the suite check and the break",
+   "files": [
+    "run_tests.sh",
+    "check_all.sh",
+    "revert_fix.sh"
+   ],
+   "goal": "run_tests.sh runs ONLY the triggering tests and cats the build tool's JUnit XML report to stdout unmodified -- no Maven banner, no timings, no logs -- and exits 0 even when the tests fail (the report is the verdict). check_all.sh runs the full suite and exits 0 only when every failure it sees is already listed in known_failing_tests: run the suite on the buggy tree yourself, record the pre-existing/flaky failures there into known_failing_tests in instance.json, and never drop the candidate for a pre-existing failure, only for a new one. revert_fix.sh reverse-applies /bench/fix.patch in the fixed tree and rebuilds, so the triggering tests fail again.",
+   "done_when": "the triggering tests FAIL on buggy and PASS on fixed in the JUnit report, check_all.sh exits 0 on both variants, and after revert_fix.sh on fixed the triggering tests fail",
+   "verbs": [
+    "run_tests",
+    "check_all",
+    "revert_fix"
+   ],
+   "rows": [
+    "stable",
+    "input_sensitive",
+    "oracle",
+    "can_fail"
+   ]
+  },
+  {
+   "name": "replay the two candidate patches on the buggy tree and write builder_notes",
+   "files": [],
+   "goal": "Apply /bench/fix.patch to the buggy variant through apply_patch.sh, rebuild and rerun: the triggering tests must pass and check_all.sh must still exit 0. Apply /bench/empty.patch instead: the triggering tests must still fail. Then write builder_notes into instance.json: the test ids you observed, the known_failing_tests and where they come from, evidence the commit is a real bug fix, that fix.patch touches non-test source, and the reason for anything you accepted against the harness's observations.",
+   "done_when": "fix.patch flips the triggering tests to passing on buggy with no new suite failure, empty.patch does not, and builder_notes records the ids, numbers and judgment",
+   "verbs": [],
+   "rows": [
+    "solver_input"
+   ]
+  }
+ ],
+ "_draw_notes": [],
+ "_instance_fields": [
+  "repo_clone_url",
+  "fix_commit_hash",
+  "buggy_commit",
+  "triggering_tests",
+  "known_failing_tests",
+  "build_tool",
+  "builder_notes"
+ ],
+ "_numbers_quoted": {},
+ "_identity_fields": [
+  "repo_clone_url",
+  "fix_commit_hash"
+ ],
+ "_stage_sections": [
+  {
+   "where_you_are": "You are building one instance of a Java program-repair benchmark: a real bug-fixing commit in a real project, packaged so the whole thing rebuilds itself from nothing inside a fresh container. Nothing exists yet — no files, no clone, no container. All you arrive with is a repository clone URL and a fix commit hash; those two fields are the instance's identity. Everything else about this bug — which commit is the buggy parent, which tests the commit adds or changes and what the build tool calls them, whether it is Maven, Gradle or Ant — you have to establish yourself by reading the repository and its history in this stage.",
+   "goal": "Establish that this commit really fixes a bug and that the bug is observable through a test the commit itself adds or modifies. Read the commit: its message, its linked issue or merged pull request, and its diff split into the part under the project's declared test source root and the part outside it. If the whole diff is test files there is no fix here and the candidate must be dropped. Then write instance.json with the fix commit's first parent as buggy_commit, the triggering test ids exactly as the build tool names them, and the build tool; a Dockerfile that installs the JDK and build tool this project actually needs; and setup.sh, which clones the repository into /work/repo with enough history that both commits and their trees are present.",
+   "traps": [
+    "Do not decide a file is a test because the word 'test' appears in its path: open the pom.xml, build.gradle or build.xml and find the declared test source root (usually src/test/java), and classify by that — LatestVersion.java or TestUtils under src/main is production source, and misclassifying it can make a genuine fix look like a test-only commit.",
+    "Do not accept a commit on its title alone: 'refactor', 'cleanup', 'polish' or a feature addition that happens to touch a test is not a bug fix, and a commit whose entire diff lies under the test root has no fix in it — drop such a candidate rather than trying to salvage it.",
+    "Get buggy_commit from the fix commit's first parent (git rev-parse <fix>^1), not from whatever commit precedes it in a linear log listing; merge commits have two parents and the second one will send you into an unrelated branch.",
+    "Write triggering_tests as the build tool names them, fully qualified class plus method, for example org.foo.bar.BarTest#baz for Maven Surefire; a bare method name or a file path will not identify anything later.",
+    "Pick the JDK by what the project actually declares (maven.compiler.source/release, sourceCompatibility, or javac target in build.xml) at this commit, not the newest JDK available — an old Ant or Maven project on JDK 21 fails to compile for reasons that have nothing to do with the bug. Install the build tool too, and leave the source out of the image entirely.",
+    "A shallow clone will bite you: setup.sh must fetch enough history that both the fix commit and its parent, and their full trees, exist in /work/repo — clone without --depth, or fetch the specific commits explicitly, and remember that /work/repo only exists on your own machine if you run setup.sh there yourself."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of a Java program-repair benchmark: a directory of scripts that rebuilds the whole instance from nothing inside a fresh container. The candidate is identified by a repository clone URL and a fix commit hash. The earlier stage got the container building from your Dockerfile and setup.sh running, and established that the commit and its files exist in the clone at /work/repo in that container. You also worked out, for this candidate, the buggy commit (the fix commit's parent), the triggering test ids, the known failing tests, and the project's build tool. Nothing else exists yet: no working trees, no patches, no compile step.",
+   "goal": "In this stage you produce the two trees the benchmark rests on. Write checkout.sh so any caller can materialise /work/repo at a given commit under an arbitrary directory name, apply_patch.sh so a unified diff under /bench applies to such a tree with git apply, and build.sh so a tree compiles both main and test sources without executing tests. Then split the fix commit's diff into fix.patch (the files outside the project's test source roots) and test.patch (the rest), plus an empty.patch that applies and changes nothing. fix.patch must be non-empty and must touch production source, since that split is what makes the buggy version buggy and the fix a real fix.",
+   "traps": [
+    "Do not classify a file as a test because the word \"test\" appears in its name, but by whether its path lies under a test source root the build tool declares (src/test/java for Maven, the srcdir of the Ant test target, Gradle's test source set), so that a file like LatestVersion.java under src/main stays in fix.patch.",
+    "Do not build the patches by hand-trimming `git show` output, but generate each half with `git diff <parent> <fix> -- <paths>` over the two path sets and confirm each applies to a fresh checkout of the parent with `git apply --check` run from inside that directory.",
+    "Do not hardcode a tree location such as /work/buggy anywhere in checkout.sh, apply_patch.sh or build.sh, but take the directory as the first argument, quote it, and cd into it, because the trees are created under names you do not choose.",
+    "If you reach for `git worktree add`, note that a path can only host one worktree and that stale worktree metadata breaks re-runs, so `git clone --shared /work/repo <dir>` followed by `git checkout --detach <commit>` is the safer shape for both the parent and the fix commit.",
+    "Do not let build.sh execute tests or skip compiling them, but use something like `mvn -o -B -DskipTests test-compile`, the Ant target that compiles test sources, or `gradle compileTestJava`, so main and test sources are both compiled and nothing runs.",
+    "Do not assume the network is available or fast when build.sh runs, but pre-warm the dependency cache in the Dockerfile (for example `mvn dependency:go-offline` or a throwaway build near the fix commit) and pin whatever Maven or Gradle wrapper the project ships."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of this benchmark: a directory of scripts that rebuilds a real Java bug from nothing, so that a program-repair technique can be measured on it. The identity you started from is the clone URL and the fix commit hash; the buggy commit, the triggering test ids and the build tool are in hand. So far the container image builds and setup runs, the commit and its files exist in the clone, and both versions build: the buggy tree (the fix commit's parent with the fix commit's test changes applied) and the fixed tree (the fix commit itself). Nothing yet runs a test or tells anyone whether the bug is visible.",
+   "goal": "In this stage you make the bug observable and the no-regression claim checkable. run_tests.sh <dir> must run only the triggering tests named in /bench/instance.json inside <dir> and put the build tool's JUnit XML on stdout exactly as the tool wrote it, exiting 0 whether the tests pass or fail, because that report is the whole verdict: failing on buggy, passing on fixed. check_all.sh <dir> must run the full suite and exit 0 only when every failure it sees is already among known_failing_tests in instance.json. revert_fix.sh <dir> must reverse-apply /bench/fix.patch in the fixed tree and rebuild, so the triggering tests fail again.",
+   "traps": [
+    "Do not let anything but the XML reach stdout: Maven's reactor banner, Gradle's progress lines, javac warnings and download chatter will corrupt the report, so send the build to stderr or a log file (mvn -q ... 1>&2, or redirect) and finish with a plain cat of the surefire/failsafe XML file for the triggering test class, without grep, sed or pretty-printing.",
+    "Do not let a test failure kill the script: Maven and Gradle exit nonzero when tests fail, so run the build under a guard (append '|| true', or capture the status) and still cat the report and exit 0 -- run_tests.sh reporting failure as a nonzero exit destroys the buggy-side check.",
+    "Do not run the whole class or the whole module when only some methods are triggering: use -Dtest=Class#method (Surefire) or --tests 'Class.method' (Gradle) with the exact ids from instance.json, and make sure the XML you print is the file for that class rather than an old report left over in target/surefire-reports from the build step -- clean the reports directory first.",
+    "Do not treat a red suite as a reason to drop the candidate: run the full suite on the buggy tree yourself first, see which tests already fail or flake for reasons unrelated to this bug, and make sure known_failing_tests in instance.json covers exactly those, so check_all.sh fails only on a new name; comparing counts instead of names hides a regression that swaps one failure for another.",
+    "Do not have check_all.sh parse human-readable console output for the word FAILURE: walk the JUnit XML files under the reports directories and collect the class#method of each failure or error, since surefire's summary text differs between versions and swallows errors in @BeforeClass.",
+    "Do not implement revert_fix.sh as a git checkout or reset: the fixed tree may not be a pristine worktree, so apply the reverse of /bench/fix.patch (patch -R -p1 or git apply -R) from <dir> and then rebuild, otherwise the stale compiled classes keep the triggering tests green and the break goes unnoticed."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of this benchmark: a real Java bug-fixing commit turned into a directory of scripts that rebuilds the whole thing from nothing on a blank machine. Earlier stages got you here: the container builds and setup runs, the commit and the files exist, both the buggy and the fixed version build, the run gives the same output every time, that output depends on the input, the triggering tests fail on buggy and pass on fixed, and a deliberate break is detected. You also have in hand the buggy_commit, the triggering test ids, the known_failing_tests you observed, and the build tool.",
+   "goal": "This stage closes the loop that program-repair evaluation actually depends on: a patch applied to the buggy tree changes the verdict. Apply /bench/fix.patch to the buggy variant through apply_patch.sh, rebuild with build.sh and rerun run_tests.sh: the triggering tests must now pass in the JUnit report, and check_all.sh must still exit 0 on that tree. Then do the same from a clean buggy tree with /bench/empty.patch: the triggering tests must still fail. Finish by putting your own judgment about this candidate into instance.json under builder_notes.",
+   "traps": [
+    "Applying fix.patch on top of a tree that already has fix.patch applied, or reusing the tree left over from the empty-patch run, gives 'previously applied' or reversed-hunk errors from git apply; have checkout.sh give you a fresh buggy tree (parent commit plus test.patch) before each patch attempt, and make apply_patch.sh fail loudly rather than silently skip a hunk.",
+    "Forgetting to rebuild after patching: Maven and Gradle will happily rerun the old classes in target/ or build/, so the triggering test appears to pass with the empty patch or fail with the fix; always run build.sh on the patched tree before run_tests.sh, and do not let an incremental cache hide the change.",
+    "Treating check_all.sh's non-zero exit as a reason to abandon the candidate when the failures are the pre-existing ones: no-regression means no NEW failure, so check_all.sh must compare the suite's failures against known_failing_tests and exit 0 when nothing outside that set failed; if it exits non-zero, look at which test names appeared before you touch anything else.",
+    "Assuming a flaky or environment-dependent test (network, timezone, locale, file ordering) that only failed on some runs belongs in the fix; rerun the suite on the patched buggy tree a couple of times so known_failing_tests really covers what fails for reasons other than this bug, and widen it rather than pretend the suite is green.",
+    "Letting run_tests.sh exit non-zero, or filtering or pretty-printing the surefire/failsafe XML: it must print the build tool's JUnit XML unmodified on stdout and exit 0 whether the tests pass or fail, otherwise the empty-patch run looks like a crash instead of a failing test.",
+    "Writing builder_notes as a vague summary: it is where your judgment about this candidate lives, including the evidence that the commit is a real bug fix rather than a refactor and that fix.patch touches source outside the project's declared test source roots, so check that claim against the patch's actual paths before you assert it."
+   ]
+  }
+ ],
+ "_drawn": {
+  "spec": "specs/d4j/spec.yaml",
+  "spec_sha256": "4f3eded4901f38b98197044b1dceec6a63741350f4314ec1f6654c0dfbbab7a8",
+  "canonical": "specs/d4j/canonical.json",
+  "identity": [
+   "repo_clone_url",
+   "fix_commit_hash"
+  ]
+ }
+}

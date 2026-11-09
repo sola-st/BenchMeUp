@@ -1,0 +1,388 @@
+{
+ "outcome": "ACCEPT",
+ "canonical_spec": {
+  "spec_id": "4f3267e5f5fc",
+  "task": "Benchmark automated compiler autotuning: given a C program and a target compiler, find an optimization-flag configuration that minimizes the program's runtime while preserving the program's output behavior relative to an unoptimized reference build.",
+  "instance_input": "A C program's source at a fixed commit; a set of generated reference inputs of increasing measured cost (the small proving input plus larger ones); the reference output digest and runtime of the DEFAULT build (compiled with no optimization flags); and a set of reference compilations (at minimum -O3), each recorded with its flags, its output digest and its runtime on the largest input.",
+  "instance_output": "A chosen compiler flag configuration (a cflags string) together with its measured runtime; the harness returns {runtime_ms, correct: bool} for that configuration.",
+  "data_source": "Public GitHub repositories of C programs that meet the admissibility clauses; the builder selects sources itself (no pre-assigned repository list) and constructs one instance directory per candidate program.",
+  "candidate_definition": "ONE instance = ONE program at ONE commit, identified by {repository URL, commit hash, program_name}, where program_name is the name of the executable the build produces and the shell invokes. The program must be a runnable command-line program (input on argv or stdin, result on stdout, exits by itself), must build cleanly with NO optimization flags and produce a reproducible output on a reference input, and must also build and run under at least one optimizing configuration including -O3 producing the SAME output. Libraries, kernel modules, firmware, code generators, network servers/clients and programs needing a display are not candidates. A repository that builds several programs may yield several instances.",
+  "oracle_strategy": "reference-equivalence",
+  "oracle_detail": "The DEFAULT build (no optimization flags) is the reference implementation. Its output on each reference input is captured and stored as a sha256 digest, with stability verified by identical digests across at least 3 consecutive runs in the same environment. To judge a candidate flag configuration: rebuild the program with those flags via build.sh honouring exported CFLAGS, run run.sh on the reference input, and compare stdout to the stored reference. Comparison is byte-identical digest equality; for programs whose output is floating-point text, comparison is numeric with the fixed relative tolerance |a-b| / max(|a|,|b|,1) <= 1e-6 applied per numeric field, where numeric fields are the whitespace/newline-split tokens that parse as a double, and token counts plus all non-numeric tokens must match exactly. Runtime is the median of at least 5 reruns. A candidate configuration succeeds if its output matches AND its median runtime beats every recorded reference compilation, -O3 among them. Fully automated; no human judgment at construction or evaluation time.",
+  "interface": "CLI: given a program id and a flag configuration, build and run it, returning {runtime_ms, correct: bool}. Each instance ships as one directory containing instance.json (repo_url, commit_sha, program_name, builder_notes), Dockerfile (compiler + libraries), setup.sh (fetch the commit into /work/repo), build.sh <dir> <flags> (builds into <dir>, honouring the given flags whatever the project's makefile says; `default` = -O0, `optimized` = -O3), run.sh <dir> <input> (prints only the program's output on stdout; diagnostics to stderr), gen_inputs.sh <dir> (writes several reference inputs of rising cost from the program's own domain), break.sh <dir> (corrupts the default build so run.sh prints something different), and a measurement command with a repetitions knob.",
+  "scale": {
+   "instance_count": "~15-20 programs in the first pass",
+   "compute_budget": "on the order of 10 CPU-hours for construction",
+   "human_budget": "0 - construction and evaluation are fully automated (the builder is an automated agent)"
+  },
+  "criteria": [
+   "the program builds with the target compiler using no optimization flags (the default build), and that build exits zero. The recorded build recipe honours an exported CFLAGS: one recipe builds the default configuration when CFLAGS=-O0 is exported and the optimizing configuration when CFLAGS=-O3 is, and whoever re-runs the recipe (the harness, at every probe and every check) exports the flags rather than trusting the recipe's own defaults -- a project whose build ignores CFLAGS (its makefile hardcodes -O2, say) is not a source until its recipe is written to honour them",
+   "a working setup is established FIRST: some reference input, however small or fast, for which the default build produces a reproducible output. No timing requirement applies at this point -- an instance is not rejected for being quick before it has been given larger inputs to work on",
+   "ONLY THEN, the instance generates SEVERAL further reference inputs of increasing COST using a script it carries, and ships all of them -- the small one it started from and the larger ones. Cost is measured, not assumed: each shipped input records the default build's median runtime on it, and inputs are ordered by that runtime (byte size does not predict cost -- a 16-byte config file can be the longest-running input). Inputs are generated by scaling parameters of the program's own domain (a bigger corpus to compress, a longer wordlist to search, a larger image to resize), never downloaded. The costliest input must bring the default build's median runtime to at least 1 second (median over at least 5 runs), so a difference between compilations is observable rather than lost in process startup, and to at most 10 seconds: every later stage re-runs this input some thirty times per instance (five repetitions per side per control), so an input that takes minutes turns one instance into hours of machine time, and an input large enough to leave the page cache makes every repetition I/O-bound and hides the very difference the instance exists to show (a 3 GB input separated at 1.15x where 100 x 10 MB from cache separated at 2.46x, same program). Generate the largest input INSIDE that band, not the largest input possible. A program that cannot be pushed into the band by any input the builder can generate is recorded with its achieved runtime and the reason -- an explicit recorded exception, never a silent pass. The exception field has exactly one spelling for \"no exception applies\" (the literal `none`) so that a reader can tell the two cases apart mechanically, and a non-`none` reason must state a fact the harness can contradict from the record: the achieved median runtime and why no generated input raises it (a program whose runtime is process startup regardless of input says so; a reason that merely restates that the floor was met is not an exception). A runtime that DOES lie in the band with a reason other than `none`, or one that does not with `none`, is a contradiction, not a pass",
+   "the costliest input must also make the program's OWN computation the thing being timed. Runtime alone is not enough: a run can spend a full second reading files or waiting and still leave the optimizer nothing to work on. The observable test is the one the instance already records -- the default build's median on the costliest input must be at least 1.05 times the -O3 build's median there (a 5% separation, the same factor the reference compilations are already compared by). Below that the workload has not been shown to be sensitive to compiler flags, and an instance built on it cannot rank flag configurations. Such a measurement is a verdict on the WORKLOAD, not on the program: the same program under a different workload often separates cleanly (walking a repository's history is I/O-bound and came out at 1.00x, while hashing a 500 MB file with the same binary came out at 3.2x). So before a program is set aside for being flag-insensitive, at least one further workload of a different KIND -- more computation per byte, less I/O, no startup dominance -- must have been tried and recorded",
+   "the program also builds under at least one optimizing configuration including -O3, and each such build produces output IDENTICAL to the default build's for the same input -- exactly for non-floating output, or within the stated numeric tolerance for floating-point",
+   "each reference compilation records its own runtime ON THE LARGEST INPUT, so a solver has a time to beat; ALL repetition timings (at least 5 runs) are recorded as a list together with their mean, median and coefficient of variation -- variance is reported as data, never used to exclude an instance (the reason is: measurements on a shared machine compete for resources and a variance threshold there measures the machine's load, not the candidate). Only a measurement rendered meaningless by interference -- order-of-magnitude outliers across repetitions -- is re-measured rather than shipped",
+   "a compilation that crashes, or whose output differs from the default build's, is recorded as such rather than silently dropped -- detecting that difference is what the instance's oracle is for",
+   "the program must be deterministic on the chosen reference inputs (or made deterministic by supplying fixed seeds/inputs): identical output digest across at least 3 consecutive runs in the same environment",
+   "the builder verifies each of these itself before delivering, by running the scripts on its own machine: the program does its own computation on the input (not startup, not I/O); the output is identical across three runs; the two versions print the same output; break.sh changes it; the default build's median runtime on the costliest input lies between 1 and 10 seconds and is at least 1.05 times the -O3 build's median",
+   "done means: the harness ran every script on a blank machine without a crash, and the builder has verified the points above itself and written what it verified, with the numbers and the reason for anything it accepted against the harness's observations, into instance.json under builder_notes. The harness reports what it observed; the builder judges."
+  ],
+  "quality_gates": [
+   "reproducibility: re-verify a sample of instances across 3 clean-environment reruns (identical output digests and runtimes within the recorded band)",
+   "corruption sensitivity: an instance whose default build has been deliberately corrupted (break.sh, or replacing the binary with a no-op) must be rejected by the pipeline's own digest gate",
+   "deduplication: near-duplicate instances removed - no two instances share {repo_url, commit_sha, program_name}, and repeated programs from the same repository are capped",
+   "the -O0/-O3 probe pair must produce different binaries and different measured runtimes on the costliest input, else the instance is not shipped"
+  ],
+  "examples": [
+   {
+    "valid": true,
+    "description": "A public C compression utility at a fixed commit, built into `foo` by a CFLAGS-honouring makefile; gen_inputs.sh synthesizes corpora of rising cost, the costliest giving a 2.4s -O0 median vs 0.9s -O3 median (2.6x separation, inside the 1-10s band), identical stdout digests across three runs and across both builds, break.sh flips the digest. exception = none."
+   },
+   {
+    "valid": false,
+    "description": "A repository whose makefile hardcodes -O2 so build.sh cannot produce a real -O0 build, or a program whose costliest generable input yields a 1.02x -O0/-O3 ratio with no alternative workload of a different kind tried."
+   }
+  ],
+  "constraints": [
+   "C programs only.",
+   "No exclusion roster of named projects was stated by the researcher; exclusions_on names the lead fields to match should one be added."
+  ],
+  "assumptions": [
+   {
+    "field": "correctness",
+    "resolved_to": "'reproducible' = identical output digest across at least 3 consecutive clean runs",
+    "reason": "term-table default, and the spec already states exactly this threshold"
+   },
+   {
+    "field": "quality",
+    "resolved_to": "added the three default quality gates (reproducibility resample, corruption sensitivity, deduplication)",
+    "reason": "the raw spec declared no `quality` field; check 7 defaults applied and recorded"
+   },
+   {
+    "field": "sampling.caps",
+    "resolved_to": "at most 3 leads per repository and at most 1 lead per {repo_url, commit_sha, program_name}",
+    "reason": "the spec allows a repository that builds several programs to yield several candidates but targets only ~15-20 instances; a per-repo cap of 3 keeps a single repository from dominating a 15-20 instance pool"
+   },
+   {
+    "field": "admissibility.last_commit",
+    "resolved_to": "pushed_at within 24 months of the population snapshot date",
+    "reason": "carried verbatim from the researcher's clause; snapshot date fixed as the mining run date"
+   }
+  ],
+  "delegations": [],
+  "admissibility": [
+   {
+    "name": "language",
+    "observe": "GET https://api.github.com/repos/{org}/{project} -> language",
+    "require": "one of [c]"
+   },
+   {
+    "name": "commit_count",
+    "observe": "git rev-list --count HEAD in a full clone",
+    "require": ">= 100"
+   },
+   {
+    "name": "build_file",
+    "observe": "GET https://api.github.com/repos/{org}/{project}/contents/ -> the root listing; report the FIRST file name in it that, lowercased, is one of the required set (absence of any such file fails the clause)",
+    "require": "one of [makefile, cmakelists.txt, configure.ac, configure, makefile.am]"
+   },
+   {
+    "name": "stars",
+    "observe": "GET https://api.github.com/repos/{org}/{project} -> stargazers_count",
+    "require": ">= 100"
+   },
+   {
+    "name": "last_commit",
+    "observe": "GET https://api.github.com/repos/{org}/{project} -> pushed_at (YYYY-MM-DD)",
+    "require": "within 24 months"
+   },
+   {
+    "name": "is_fork",
+    "observe": "GET https://api.github.com/repos/{org}/{project} -> fork",
+    "require": "is false"
+   }
+  ],
+  "artifact_variants": [
+   {
+    "name": "default",
+    "description": "the program built with NO optimization flags -- the functional reference. Its output is what every other compilation must reproduce, and its runtime is the unoptimized starting point",
+    "check_cmd": "sh run.sh . <reference input>",
+    "expect": "pass",
+    "results": "none",
+    "results_none_reason": "digest comparison of program output is the evidence; no test framework runs"
+   },
+   {
+    "name": "optimized",
+    "description": "the same program built with the recorded optimizing flags (including -O3). Its output must match the default build's; its runtime is the bar a solver has to beat",
+    "check_cmd": "sh run.sh . <reference input>",
+    "expect": "pass",
+    "results": "none",
+    "results_none_reason": "digest comparison of program output is the evidence; no test framework runs"
+   }
+  ],
+  "solver_input": {
+   "kind": "parameter",
+   "name": "cflags",
+   "describes": "the compiler flag configuration the solver proposes, applied to the same source",
+   "probe_values": [
+    "-O0",
+    "-O3"
+   ]
+  },
+  "negative_control": {
+   "break_cmd": "corruption_cmd",
+   "restore_cmd": "rebuild_cmd",
+   "check": "default",
+   "describes": "replace the built binary with one that does nothing, or corrupt a constant the output depends on"
+  },
+  "parameters": [
+   {
+    "name": "cflags",
+    "kind": "string",
+    "default": "-O0"
+   }
+  ],
+  "entry_contract": [
+   {
+    "field": "repo_url",
+    "require": "is a clone url",
+    "teach": "record the repository's git clone URL, e.g. https://github.com/{org}/{project}.git"
+   },
+   {
+    "field": "commit_sha",
+    "require": "is a git sha",
+    "teach": "record the full 40-hex commit hash you screened, not a branch name"
+   },
+   {
+    "field": "program_name",
+    "require": "is an atomic name",
+    "teach": "the NAME OF THE EXECUTABLE the build produces and the shell invokes (e.g. `gzip`), not the repository name"
+   },
+   {
+    "field": "clone_path",
+    "require": "is a plain absolute path",
+    "teach": "record the absolute path where you cloned this repository to read its documentation"
+   },
+   {
+    "field": "invocation_cmd",
+    "require": "is a command invoking {program_name}",
+    "teach": "the shell invocation the documentation shows, with the executable in command position and its input on argv or stdin; no --version/--help banners"
+   },
+   {
+    "field": "build_file",
+    "require": "one of [makefile, cmakelists.txt, configure.ac, configure, makefile.am]",
+    "teach": "report the FIRST root-listing file name that, lowercased, is one of this set"
+   },
+   {
+    "field": "build_doc_file",
+    "require": "is a relative path to one file",
+    "teach": "the repository-relative path of the file containing the project's own build instructions (e.g. README.md, INSTALL)"
+   },
+   {
+    "field": "build_doc_quote",
+    "require": "is distinct across leads",
+    "teach": "copy VERBATIM the single line of that file showing how the program is built; a paraphrase or a sentence reused across leads is a template, not an observation"
+   },
+   {
+    "field": "compute_doc_file",
+    "require": "is a relative path to one file",
+    "teach": "the repository-relative path of the file whose documentation describes what the program computes on the data it is given"
+   },
+   {
+    "field": "compute_doc_quote",
+    "require": "is distinct across leads",
+    "teach": "copy VERBATIM the sentence describing the computation the program performs on its input (compressing, hashing, parsing, searching, transforming, solving); a network daemon/client, GUI or code-generator description disqualifies the source"
+   },
+   {
+    "field": "language",
+    "require": "one of [c]",
+    "teach": "GET https://api.github.com/repos/{org}/{project} -> language"
+   },
+   {
+    "field": "commit_count",
+    "require": ">= 100",
+    "teach": "git rev-list --count HEAD in a full clone"
+   },
+   {
+    "field": "stars",
+    "require": ">= 100",
+    "teach": "GET https://api.github.com/repos/{org}/{project} -> stargazers_count"
+   },
+   {
+    "field": "last_commit",
+    "require": "within 24 months",
+    "teach": "GET https://api.github.com/repos/{org}/{project} -> pushed_at, recorded as YYYY-MM-DD"
+   },
+   {
+    "field": "is_fork",
+    "require": "is false",
+    "teach": "GET https://api.github.com/repos/{org}/{project} -> fork must be false"
+   }
+  ],
+  "exclusions_on": [
+   "repo_url",
+   "program_name"
+  ],
+  "corroboration_contract": [
+   {
+    "field": "clone_path",
+    "require": "is non-empty",
+    "teach": "record where you cloned this repository; every check below runs inside it"
+   },
+   {
+    "run": "git -C {clone_path} rev-parse --verify {commit_sha}^{commit}",
+    "require": "output is a git sha",
+    "teach": "the recorded commit must exist in the clone you made"
+   },
+   {
+    "run": "git -C {clone_path} config --get remote.origin.url",
+    "require": "exit zero and some output line",
+    "teach": "the clone must be of the repository the lead names"
+   },
+   {
+    "run": "git -C {clone_path} rev-list --count HEAD",
+    "require": "output matches ^[0-9]+$",
+    "derive": "observed_commit_count",
+    "teach": "commit history depth is derived by the harness, never typed by the miner"
+   },
+   {
+    "run": "test -f {clone_path}/{build_file}",
+    "require": "exit zero",
+    "teach": "the root build file you reported must actually be at the repository root"
+   },
+   {
+    "run": "grep -Fq -- {build_doc_quote} {clone_path}/{build_doc_file}",
+    "require": "exit zero",
+    "teach": "copy the build line VERBATIM from that file; a paraphrase is not there"
+   },
+   {
+    "run": "grep -Fq -- {compute_doc_quote} {clone_path}/{compute_doc_file}",
+    "require": "exit zero",
+    "teach": "copy the sentence describing the computation VERBATIM from that file; a summary is not there"
+   },
+   {
+    "run": "grep -rlF -- {program_name} {clone_path}/{build_file}",
+    "require": "exit zero and some output line",
+    "teach": "the executable name you recorded must appear in the project's own root build file, so the build plausibly produces it"
+   },
+   {
+    "run": "git -C {clone_path} ls-files -- *.c",
+    "require": "some output line ends with one of [.c, .h]",
+    "teach": "the candidate must be a C program: the tracked tree must contain C sources"
+   }
+  ],
+  "corroboration_accept": "In {clone_path}, commit {commit_sha} of {repo_url} exists, its root build file {build_file} names the executable {program_name}, and the verbatim build line from {build_doc_file} and the verbatim computation sentence from {compute_doc_file} were both found where the lead says they are.",
+  "sampling": {
+   "pool_requires": [
+    "repo_url",
+    "org",
+    "project",
+    "language",
+    "stars",
+    "last_commit",
+    "is_fork",
+    "build_file",
+    "default_branch"
+   ],
+   "spread_by": "org",
+   "pool_exclusion_fields": [
+    "repo_url",
+    "project"
+   ],
+   "lead_requires": [
+    "repo_url",
+    "commit_sha",
+    "program_name",
+    "clone_path",
+    "invocation_cmd",
+    "build_file",
+    "build_doc_file",
+    "build_doc_quote",
+    "compute_doc_file",
+    "compute_doc_quote",
+    "language",
+    "commit_count",
+    "stars",
+    "last_commit",
+    "is_fork"
+   ],
+   "lead_key": [
+    "repo_url",
+    "commit_sha",
+    "program_name"
+   ],
+   "normalize": {
+    "repo_url": "git_url",
+    "commit_sha": "full_sha",
+    "program_name": "none"
+   },
+   "caps": [
+    {
+     "dimension": "per_repository",
+     "keys": [
+      "repo_url"
+     ],
+     "limit": 3
+    },
+    {
+     "dimension": "per_candidate",
+     "keys": [
+      "repo_url",
+      "commit_sha",
+      "program_name"
+     ],
+     "limit": 1
+    },
+    {
+     "dimension": "per_org",
+     "keys": [
+      "repo_url"
+     ],
+     "limit": 5
+    }
+   ],
+   "found_enforces": [
+    "the source is a non-forked GitHub repository whose API language is C, with >= 100 stars, >= 100 commits, pushed_at within 24 months, and a root build file among [makefile, cmakelists.txt, configure.ac, configure, makefile.am]",
+    "the lead points at ONE candidate: repository URL, full commit sha and the NAME of the executable the build produces, plus the shell invocation that runs it with its input on argv or stdin",
+    "the lead carries NO timings and NO build of its own - nothing is compiled or measured at the finding stage",
+    "screening evidence is quoted, not summarised: a verbatim build line and a verbatim computation sentence, each with the repository-relative file it was copied from, and each distinct across leads"
+   ],
+   "delivered_enforces": [
+    "the recorded commit resolves inside the miner's own clone and the clone's origin is the recorded repository",
+    "the recorded root build file exists and mentions the recorded executable name",
+    "both recorded quotes are found verbatim, by grep -F, in the files the lead names",
+    "the tracked tree contains C sources"
+   ],
+   "search_hints": "Search GitHub for C command-line computation tools: use GET https://api.github.com/search/repositories?q=language:C+stars:>=100+pushed:>=<snapshot-24mo> with topic and keyword facets for compression, hashing, checksums, parsers, regex/search engines, image and audio transcoding, chess/SAT/constraint solvers, numerical kernels and interpreters; also mine curated indexes of classic Unix utilities and benchmark-adjacent C tools. For each source, GET /repos/{org}/{project} for language, stargazers_count, fork and pushed_at, GET /repos/{org}/{project}/contents/ for the FIRST root file lowercasing into [makefile, cmakelists.txt, configure.ac, configure, makefile.am], clone to run git rev-list --count HEAD, and read the repository's own README/INSTALL/docs to copy (a) the line showing how it is built and (b) the sentence describing the computation it performs on its input. Propose a source when its own documentation shows it reads an input and computes over it (compressing, hashing, parsing, searching, transforming, solving) and prints to stdout. Set aside network daemons and clients, GUI programs, libraries without an executable, kernel modules, firmware, code generators, programs whose work happens on another machine, and projects whose own instructions do not say how to build them. Prefer projects whose makefile appends rather than hardcodes CFLAGS. Do not build, run or time anything at this stage.",
+   "strategies": [
+    {
+     "kind": "api_facet_search",
+     "strategy": "GitHub repository search faceted on language:C with stars and pushed_at floors, iterated over computation-domain keywords (compress, hash, checksum, parse, search, solver, encode, resize, render-to-file)"
+    },
+    {
+     "kind": "topic_walk",
+     "strategy": "Walk GitHub topics (compression, cryptography, hashing, parser, cli, benchmark, solver) restricted to C repositories and screen each root listing for a standard build file"
+    },
+    {
+     "kind": "curated_index",
+     "strategy": "Mine curated lists of classic Unix/CLI C utilities and of C projects used in compiler-benchmark literature, resolving each named project to its canonical non-fork GitHub repository"
+    },
+    {
+     "kind": "multi_program_repo_expansion",
+     "strategy": "For an already-admissible repository whose build file declares several executables, register each executable as its own lead (up to the per-repository cap), each with its own invocation and documentation quotes"
+    },
+    {
+     "kind": "docs_grep",
+     "strategy": "Use GitHub code search over C repositories for build-instruction markers (`make`, `./configure && make`) co-occurring with usage lines showing an executable reading a file argument and writing stdout"
+    }
+   ],
+   "mining_quality_gates": [
+    "every delivered lead satisfies all six admissibility clauses as observed values, not assertions",
+    "every delivered lead names one executable and one commit; duplicate {repo_url, commit_sha, program_name} triples are dropped",
+    "both documentation quotes are verbatim and located by grep in the named files inside the miner's clone",
+    "no lead carries a runtime, a build log, or any number the miner would have had to compile to obtain",
+    "the invocation command puts the recorded executable in command position and is not a --version or --help banner"
+   ]
+  }
+ }
+}

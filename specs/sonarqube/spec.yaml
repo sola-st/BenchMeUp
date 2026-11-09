@@ -1,0 +1,109 @@
+task: |
+  Analyze and fix a SonarQube warning in a project without introducing a new warning
+  - analyzer: SonarQube, server inside the instance, fed by its scanner
+  - SonarQube's report is the verdict
+
+instance: |
+  One warning = one instance.
+  - identity: rule key (java:S1234), file, line, project, revision
+  - given: the project at that revision, plus the identity above and the warning's type and
+    severity
+  - expected: an edited project where the same SonarQube no longer reports that warning there
+
+admissibility: |
+  Public Java projects that build with Maven or Gradle, popular and actively maintained, not
+  forks. Whether a project's history actually contains warning-removing commits is not
+  screened for: it is not visible from what a project says about itself, and it is the first
+  thing the builder measures.
+
+data: |
+  - from their history: a revision with the warning, and a later one where it is gone (the next
+    commit or a few commits on); they need not be parent and child
+  - the developer's change: the diff between those two revisions, kept as a reference answer;
+    it may carry unrelated edits
+  - rules: any SonarQube Java rule; no list, no exclusions
+  - one commit may clear several warnings; the builder records that and keeps one as the
+    instance's target
+  - prefer projects that seem to fix sonarqube warnings
+  - a candidate is a repository at one commit whose message says a warning was fixed and names
+    the rule; that commit is head_sha
+  - before recording a candidate the search checks three things with git alone, no analyzer and
+    no build:
+      the commit has a parent
+      its diff modifies an existing .java file, not only adds new ones
+      the message or the diff names sonar, squid, or a rule id like java:S1234
+    a candidate that fails any of the three is not recorded
+  - what the search hands the builder, and the only two fields it records, spelled exactly so:
+      clone_url  the repository's clone URL
+      head_sha   the commit it found
+    every other field of an instance is the builder's to establish; do not rename these two
+
+correctness: |
+  Re-run SonarQube. Its report is the whole verdict: no person and no model judges an answer.
+  Compile the edited project and analyze it with the SonarQube version and active rules the
+  instance records, then all three:
+  1. the recorded warning is gone at that file and line
+  2. it still compiles, the edited files still parse, and the method or class that held the
+     warning still exists
+  3. in the files the change touched, no warning of any rule that was not there before; a new
+     warning elsewhere is not the fix's doing and does not fail the answer
+  Not checked: behaviour. No tests run.
+
+interface: |
+  Use: ask for an instance by id, get the project with the warning, edit it, ask if it worked.
+  Answer: warning gone / enclosing declaration still there / new warnings.
+  The instance directory rebuilds itself from nothing on a machine with only Docker:
+  - Java toolchain, build tool, and these exact versions, the same in every instance:
+      SonarQube Community Build 25.5.0.107428
+        https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-25.5.0.107428.zip
+      sonar-scanner-cli 7.0.2.4839
+        https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-7.0.2.4839-linux-x64.zip
+    Use those URLs as written. Other versions are published but no longer served (9.9.5.90326
+    and 9.9.0.65486 answer 403), and the scanner archive was renamed at 6.x: up to 5.x it ends
+    -linux.zip, from 6.x -linux-x64.zip. Do not guess a version number.
+  - the project's dependencies already fetched: nothing reaches the network while checking,
+    and the analysis goes to the SonarQube inside the instance, never SonarCloud
+  - both revisions compile offline inside it
+  It ships:
+  - both revisions, a way to compile one, and one script that compiles, analyzes, waits, reads
+    the warnings and answers by its exit status
+  - that script says no on the revision with the warning and yes on the one the developer fixed
+  - SonarQube's warning list at both revisions, and the exact compile and analyze commands
+  - the enclosing declaration of the warning
+  - the developer's change as a patch, and an empty patch: the first turns the verdict to yes,
+    the second does not
+  - a way to undo the developer's change in the fixed revision, turning the verdict back to no
+    (proof the check can fail)
+  - what the builder verified itself, with the numbers it saw
+  Done: the scripts run on a fresh machine without crashing, and the builder has checked the
+  above itself and written down what it saw.
+
+artifact_variants:
+  - name: violating
+    description: "the revision that has the warning; the check must say no here"
+    check_cmd: "sh check.sh ."
+    expect: fail
+    results: none
+    results_none_reason: "SonarQube's own report is the evidence; no tests run"
+  - name: fixed
+    description: "the later revision where the developer's change removed it; the check must say yes here"
+    check_cmd: "sh check.sh ."
+    expect: pass
+    results: none
+    results_none_reason: "SonarQube's own report is the evidence; no tests run"
+
+negative_control:
+  break_cmd: corruption_cmd
+  restore_cmd: restore_cmd
+  check: fixed
+  describes: "undo the developer's change in the fixed revision, so SonarQube reports the warning again and the verdict goes back to no"
+
+solver_input:
+  kind: workdir
+  path: "{clone_path}"
+  describes: "the solver edits the checked-out project that has the warning; the check compiles it, re-runs SonarQube over it and answers"
+
+scale: |
+  - about 50 instances, spread across rules: at most 15 of them on any one rule
+  - time and machine cost do not matter; minutes per instance is fine
+  - no human effort, do everything end-to-end by yourself

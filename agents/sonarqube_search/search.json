@@ -1,0 +1,14 @@
+{
+ "spec": "specs/sonarqube/spec.yaml",
+ "spec_sha256": "1679023d31b8618d0e985147ab9b1a4e4fd2f3ad3f5fcaa3d2acfbcd2c7bae4e",
+ "canonical": "specs/sonarqube/canonical.json",
+ "identity": [
+  "clone_url",
+  "head_sha"
+ ],
+ "normalize": {
+  "clone_url": "git_url",
+  "head_sha": "full_sha"
+ },
+ "target": 60
+}

@@ -1,0 +1,14 @@
+{
+ "identity": [
+  "repo_url",
+  "commit_sha",
+  "program_name"
+ ],
+ "normalize": {
+  "repo_url": "git_url",
+  "commit_sha": "full_sha",
+  "program_name": "none"
+ },
+ "count": 60,
+ "agent_dir": "agents/boca_search"
+}

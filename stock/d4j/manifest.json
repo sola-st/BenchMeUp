@@ -1,0 +1,12 @@
+{
+ "identity": [
+  "repo_clone_url",
+  "fix_commit_hash"
+ ],
+ "normalize": {
+  "repo_clone_url": "git_url",
+  "fix_commit_hash": "full_sha"
+ },
+ "count": 176,
+ "agent_dir": "agents/d4j_search"
+}

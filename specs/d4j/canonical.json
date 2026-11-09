@@ -1,0 +1,458 @@
+{
+ "outcome": "ACCEPT",
+ "canonical_spec": {
+  "spec_id": "83549221a438",
+  "task": "Build a Defects4J-style Java program-repair benchmark from real bug-fixing commits in public Java projects that are not already covered by Defects4J. Each instance pins a buggy revision (the fix commit's parent) carrying the fix commit's own test changes, plus the fixed revision, so an automated repair technique can be validated by running the triggering test(s) and the rest of the suite.",
+  "instance_input": "A Defects4J-format bug record plus a checked-out buggy working tree: project id, buggy revision hash, fixed revision hash, report id/url, and the id(s) of the triggering test(s), with the repository cloned at the buggy revision (parent of the fix commit) with the fix commit's test changes already applied.",
+  "instance_output": "A source-code patch against the buggy revision that makes the triggering test(s) pass while no test outside the recorded known_failing_tests fails.",
+  "data_source": "Public, actively-maintained Java projects on GitHub with a genuine test suite, a linked issue tracker, git history, and an Ant/Maven/Gradle build; sampled across distinct organisations and project families; projects already in Defects4J are excluded.",
+  "candidate_definition": "ONE bug-fixing commit in ONE repository, identified by {repo_clone_url, fix_commit_hash}. The commit must fix a real bug (evidenced by its commit message, linked issue, or merged pull request -- not a refactor or feature addition) and must, in that same commit, add or modify a test that fails at the commit's parent and passes at the commit itself. The commit's diff splits into a fix patch (files NOT under a test source root) and a test patch (the rest); a commit whose whole diff lies in test files is not a candidate.",
+  "oracle_strategy": "fail-to-pass-tests",
+  "oracle_detail": "Two built variants. `buggy` = fix commit's parent with test.patch applied; `fixed` = the fix commit. `sh run_tests.sh <dir>` runs the triggering tests and emits the build tool's JUnit XML on stdout, exiting 0 regardless of outcome; the harness reads the triggering tests' outcome from that XML. Acceptance requires: triggering tests FAIL on `buggy` (expect_failures 1) and PASS on `fixed` (expect_failures 0); applying fix.patch to `buggy` via apply_patch.sh makes them pass, applying empty.patch does not; and the whole-suite check (check_all.sh, exit 0 = no regression) shows no failing test outside the instance's recorded known_failing_tests (tests already failing on the buggy version for unrelated reasons). No-regression means no NEW failure, not a green suite. Negative control: revert_fix.sh in the `fixed` tree must flip the triggering tests back to failing.",
+  "interface": "Each instance ships as one directory: instance.json (repo_clone_url, fix_commit_hash, buggy_commit, triggering_tests, known_failing_tests, builder_notes), Dockerfile (JDK + build tool), setup.sh (fetch both commits into /work/repo), checkout.sh <dir> <commit>, apply_patch.sh <dir> <patch>, build.sh <dir>, run_tests.sh <dir>, optional check_all.sh <dir>, revert_fix.sh <dir>, and fix.patch / test.patch / empty.patch. The bug record itself is Defects4J active-bugs.csv-compatible: project id, buggy/fixed revision hashes, report id/url.",
+  "scale": {
+   "instance_count": "15-20 bugs in the first pass (target 18)",
+   "compute_budget": "Per instance: clone plus two full builds and at least three test runs (triggering tests on buggy and fixed, full suite on fixed) inside the instance's own Docker image; whole-suite runs capped at 60 minutes each. Reproducibility sampling adds 3 clean reruns for a sample of instances.",
+   "human_budget": "None required; correctness is fully executable. Builder self-verification is engineering time, not annotation labour."
+  },
+  "criteria": [
+   "real bug-fixing commit (not synthetic/injected), confirmed by commit message, linked issue, or merged pull request",
+   "the commit's own added/modified test fails on its parent commit and passes on the commit itself, confirmed by an actual test run",
+   "the fix changes non-test source: the fix patch is the non-test part of the commit's diff, the test patch is the rest, and a commit whose whole diff is in test files is not a candidate (a test-only commit was once delivered, wrongly, and is worthless). A file is a TEST FILE when its path lies under a test source root -- src/test/, or whichever directory this project's build tool declares as its test sources -- and NOT because the word \"test\" appears somewhere in its name: LatestVersion.java is production source.",
+   "both revisions build",
+   "the rest of the suite must not REGRESS, which is not the same as being green. Real projects carry tests that already fail, or fail intermittently, for reasons that have nothing to do with this bug, and such a project is a perfectly good source. So: the instance records, as known_failing_tests, the tests that fail on the BUGGY version for a reason other than this bug, and the whole-suite check passes on a version when no test outside that recorded set fails there. A candidate is never dropped for a pre-existing failure, only for a NEW one.",
+   "the builder verifies itself, by running them on its own machine, that the triggering tests fail on the buggy version and pass on the fixed one, that the fix changes non-test source, and that no test outside known_failing_tests fails on the fixed version; it records the test ids, the known_failing_tests it observed, and its judgment in builder_notes",
+   "done means: the harness ran every script on a blank machine without a crash, and the builder has verified the points above itself and written what it verified, with the numbers and the reason for anything it accepted against the harness's observations, into instance.json under builder_notes. The harness reports what it observed; the builder judges."
+  ],
+  "quality_gates": [
+   "Reproducibility: re-verify a sample of instances across 3 clean-environment reruns; identical triggering-test outcomes required.",
+   "Corruption sensitivity: a deliberately corrupted instance (empty fix.patch, or fix.patch touching only test-source paths, or reverted fix in the `fixed` tree) must be rejected by the pipeline's own gates.",
+   "Deduplication: near-duplicate instances removed -- at most one instance per {repo_clone_url, fix_commit_hash} and no two instances whose fix.patch hunks are identical.",
+   "Spread: instances distributed across distinct GitHub organisations rather than clustered on the first project examined.",
+   "Every declared check script is executed and its exit status read; the JUnit report is parsed, not trusted from prose."
+  ],
+  "examples": [
+   {
+    "valid": true,
+    "description": "A commit in a non-Defects4J Apache Maven Java project whose message cites a fixed JIRA bug, changing src/main/java/... and adding a case to src/test/java/...Test.java; the new case fails at the parent and passes at the commit."
+   },
+   {
+    "valid": false,
+    "description": "A commit whose entire diff lies under src/test/ (test-only): no fix patch exists, so it is not a candidate."
+   },
+   {
+    "valid": false,
+    "description": "A commit in Apache Commons Lang: the project is on the Defects4J exclusion roster."
+   },
+   {
+    "valid": false,
+    "description": "A commit that only modifies LatestVersion.java under src/main/java with no added/modified test: no revealing test, so not a candidate. (LatestVersion.java itself is production source, not a test file.)"
+   }
+  ],
+  "constraints": [
+   "Java projects only; any standard JVM build (Maven, Gradle, Ant).",
+   "A project already in Defects4J is disqualified, since these instances must be new. Excluded: Chart, Cli, Closure, Codec, Collections, Compress, Csv, Gson, JacksonCore, JacksonDatabind, JacksonXml, Jsoup, JxPath, Lang, Math, Mockito, Time",
+   "Repositories must be real, public, with git history and a linked issue tracker.",
+   "Instances must spread across different organisations and project families."
+  ],
+  "assumptions": [
+   {
+    "field": "data",
+    "resolved_to": "'popular' resolved through the spec's own admissibility clause stars >= 100 (the researcher stated the floor explicitly, so their number governs over the table default of 1000).",
+    "reason": "The term table resolves 'popular' by stars; the spec already carries a checkable star clause, so no floor is invented."
+   },
+   {
+    "field": "data",
+    "resolved_to": "'actively-maintained' / 'ongoing commit activity' resolved through the spec's own admissibility clause pushed_at within 12 months.",
+    "reason": "The researcher supplied a measurable activity clause; it is used verbatim rather than substituting the table's 6-month default."
+   },
+   {
+    "field": "scale",
+    "resolved_to": "instance_count = 18 (midpoint of the stated ~15-20).",
+    "reason": "A single number is needed downstream; the stated range is narrow and the midpoint is the safe reading."
+   },
+   {
+    "field": "criteria",
+    "resolved_to": "'test source root' = the directory the project's build tool declares as test sources (Maven/Gradle src/test/**, Ant's declared test srcdir); file-name heuristics are forbidden.",
+    "reason": "Stated explicitly in the raw criteria; recorded so construction enforces it mechanically."
+   },
+   {
+    "field": "quality",
+    "resolved_to": "Default quality gates added: reproducibility across 3 clean reruns, corruption sensitivity, deduplication.",
+    "reason": "The raw spec declared no quality field."
+   }
+  ],
+  "delegations": [],
+  "admissibility": [
+   {
+    "name": "language",
+    "observe": "GET https://api.github.com/repos/{org}/{project} -> language",
+    "require": "one of [java]"
+   },
+   {
+    "name": "commit_count",
+    "observe": "git rev-list --count HEAD in a full clone",
+    "require": ">= 1000"
+   },
+   {
+    "name": "has_issues",
+    "observe": "GET https://api.github.com/repos/{org}/{project} -> has_issues",
+    "require": "is true"
+   },
+   {
+    "name": "closed_bug_issues",
+    "observe": "GET https://api.github.com/search/issues?q=repo:{org}/{project}+is:issue+is:closed+label:bug -> total_count",
+    "require": ">= 20"
+   },
+   {
+    "name": "stars",
+    "observe": "GET https://api.github.com/repos/{org}/{project} -> stargazers_count",
+    "require": ">= 100"
+   },
+   {
+    "name": "last_commit",
+    "observe": "GET https://api.github.com/repos/{org}/{project} -> pushed_at (YYYY-MM-DD)",
+    "require": "within 12 months"
+   },
+   {
+    "name": "is_fork",
+    "observe": "GET https://api.github.com/repos/{org}/{project} -> fork",
+    "require": "is false"
+   }
+  ],
+  "artifact_variants": [
+   {
+    "name": "buggy",
+    "description": "the project checked out and built at the buggy revision (the fix commit's parent), with the fix commit's own added/modified triggering test(s) applied to it. The check runs the triggering test(s) and passes only if they FAIL here -- the bug is observable",
+    "check_cmd": "sh run_tests.sh .",
+    "expect": "pass",
+    "results": "junit-xml",
+    "expect_failures": 1
+   },
+   {
+    "name": "fixed",
+    "description": "the project checked out and built at the fixed revision (the fix commit itself). The check runs the same triggering test(s) and passes only if they PASS here. The whole suite is checked separately and must show no failure outside the recorded known_failing_tests -- fail-to-pass plus no-regression, where no-regression means no NEW failure, not a green suite",
+    "check_cmd": "sh run_tests.sh .",
+    "expect": "pass",
+    "results": "junit-xml",
+    "expect_failures": 0
+   }
+  ],
+  "solver_input": {
+   "kind": "workdir",
+   "path": "{clone_path}",
+   "describes": "the solver edits the checked-out buggy source tree; the check re-runs the triggering test against its edit"
+  },
+  "negative_control": {
+   "break_cmd": "corruption_cmd",
+   "check": "fixed",
+   "describes": "revert the fix in the working tree (or delete the transplanted test) so the triggering test must stop passing"
+  },
+  "entry_contract": [
+   {
+    "field": "repo_clone_url",
+    "require": "is a clone url",
+    "teach": "record the git clone URL of the repository, e.g. https://github.com/{org}/{repo}.git -- not a project name and not an owner/name pair."
+   },
+   {
+    "field": "fix_commit_hash",
+    "require": "is a git sha",
+    "teach": "the full 40-hex sha of the bug-fixing commit, as printed by `git log --format=%H`."
+   },
+   {
+    "field": "org",
+    "require": "is an atomic name",
+    "teach": "the GitHub organisation or user that owns the repository."
+   },
+   {
+    "field": "repo",
+    "require": "is an atomic name",
+    "teach": "the GitHub repository name, without the owner."
+   },
+   {
+    "field": "clone_path",
+    "require": "is a plain absolute path",
+    "teach": "the absolute path of the full clone you made on this machine; every corroboration step runs inside it."
+   },
+   {
+    "field": "report_url",
+    "require": "is a full http url",
+    "teach": "the URL of the linked issue or the merged pull request that evidences this is a real bug fix, e.g. https://github.com/{org}/{repo}/issues/123 or an Apache JIRA browse URL."
+   },
+   {
+    "field": "commit_message_excerpt",
+    "require": "is distinct across leads",
+    "teach": "paste one line VERBATIM from this commit's own message showing it fixes a bug (e.g. 'Fix NPE in X when Y'). A generic sentence repeated across leads is a template, not an observation."
+   },
+   {
+    "field": "changed_test_path",
+    "require": "is a relative path to one file",
+    "teach": "one path under the project's test source root that this commit adds or modifies, exactly as `git show --name-only {fix_commit_hash}` prints it."
+   },
+   {
+    "field": "changed_source_path",
+    "require": "is a relative path to one file",
+    "teach": "one NON-test path this commit changes, exactly as `git show --name-only {fix_commit_hash}` prints it. A path under src/test/ is not a fix."
+   },
+   {
+    "field": "build_system",
+    "require": "one of [maven, gradle, ant]",
+    "teach": "which build tool this repository uses, judged by the build file present at the repository root (pom.xml, build.gradle/build.gradle.kts, build.xml)."
+   },
+   {
+    "field": "language",
+    "require": "one of [java]",
+    "teach": "GET https://api.github.com/repos/{org}/{repo} -> language."
+   },
+   {
+    "field": "commit_count",
+    "require": ">= 1000",
+    "teach": "`git rev-list --count HEAD` in your full clone."
+   },
+   {
+    "field": "has_issues",
+    "require": "is true",
+    "teach": "GET https://api.github.com/repos/{org}/{repo} -> has_issues."
+   },
+   {
+    "field": "closed_bug_issues",
+    "require": ">= 20",
+    "teach": "GET https://api.github.com/search/issues?q=repo:{org}/{repo}+is:issue+is:closed+label:bug -> total_count."
+   },
+   {
+    "field": "stars",
+    "require": ">= 100",
+    "teach": "GET https://api.github.com/repos/{org}/{repo} -> stargazers_count."
+   },
+   {
+    "field": "last_commit",
+    "require": "within 12 months",
+    "teach": "GET https://api.github.com/repos/{org}/{repo} -> pushed_at, recorded as YYYY-MM-DD."
+   },
+   {
+    "field": "is_fork",
+    "require": "is false",
+    "teach": "GET https://api.github.com/repos/{org}/{repo} -> fork."
+   }
+  ],
+  "exclusions_on": [
+   "repo",
+   "repo_clone_url"
+  ],
+  "corroboration_contract": [
+   {
+    "field": "clone_path",
+    "require": "is non-empty",
+    "teach": "record the absolute path where you cloned this repository; the harness runs every step inside it."
+   },
+   {
+    "run": "git -C {clone_path} rev-parse --verify {fix_commit_hash}^{commit}",
+    "require": "output is a git sha",
+    "save": "resolved_fix_sha"
+   },
+   {
+    "run": "git -C {clone_path} rev-parse --verify {fix_commit_hash}^1",
+    "require": "output is a git sha",
+    "derive": "buggy_commit"
+   },
+   {
+    "run": "git -C {clone_path} log -1 --format=%B {fix_commit_hash}",
+    "require": "exit zero and some output line"
+   },
+   {
+    "run": "git -C {clone_path} log -1 --format=%B {fix_commit_hash} | grep -Fq -- {commit_message_excerpt}",
+    "require": "exit zero",
+    "teach": "copy the line VERBATIM out of `git log -1 --format=%B {fix_commit_hash}`; a paraphrase is not in the commit message."
+   },
+   {
+    "tracker": "report_url",
+    "policy": {
+     "jira_types": [
+      "Bug"
+     ],
+     "label_words": [
+      "bug",
+      "defect",
+      "regression",
+      "fix"
+     ],
+     "text_pattern": "(?i)\\b(bug|fix(e[sd])?|defect|regression|npe|exception|incorrect|fail(s|ing)?)\\b",
+     "kind_into": "report_kind"
+    }
+   },
+   {
+    "run": "git -C {clone_path} show --name-only --pretty=format: {fix_commit_hash}",
+    "require": "exit zero and some output line"
+   },
+   {
+    "run": "git -C {clone_path} show --name-only --pretty=format: {fix_commit_hash} | grep -Fxq -- {changed_test_path}",
+    "require": "exit zero",
+    "teach": "the test path you recorded must be a file this very commit touches, spelled exactly as `git show --name-only` prints it."
+   },
+   {
+    "run": "printf '%s\\n' {changed_test_path}",
+    "require": "output matches (^|/)(src/test/|src/it/|test/|tests/)",
+    "teach": "changed_test_path must lie under the project's test source root; a production file whose name merely contains 'Test' does not qualify."
+   },
+   {
+    "run": "git -C {clone_path} show --name-only --pretty=format: {fix_commit_hash} | grep -Fxq -- {changed_source_path}",
+    "require": "exit zero",
+    "teach": "the non-test path you recorded must be a file this very commit touches."
+   },
+   {
+    "run": "printf '%s\\n' {changed_source_path}",
+    "require": "output matches ^(?!.*(^|/)(src/test/|src/it/|test/|tests/)).*\\.(java|kt|scala|properties|xml)$",
+    "teach": "changed_source_path must NOT lie under a test source root -- a commit whose whole diff is in test files has no fix in it."
+   },
+   {
+    "marker_search": {
+     "clone": "repo_clone_url",
+     "path": "clone_path",
+     "system": "build_system",
+     "derive": "build_marker",
+     "families": {
+      "maven": [
+       "pom.xml"
+      ],
+      "gradle": [
+       "build.gradle",
+       "build.gradle.kts",
+       "settings.gradle",
+       "settings.gradle.kts"
+      ],
+      "ant": [
+       "build.xml"
+      ]
+     }
+    }
+   }
+  ],
+  "corroboration_accept": "{org}/{repo} at {fix_commit_hash} (parent {buggy_commit}) is a {report_kind} bug fix built with {build_system} ({build_marker}) that touches non-test source {changed_source_path} and test {changed_test_path}.",
+  "sampling": {
+   "pool_requires": [
+    "org",
+    "repo",
+    "repo_clone_url",
+    "language",
+    "stars",
+    "commit_count",
+    "has_issues",
+    "closed_bug_issues",
+    "last_commit",
+    "is_fork",
+    "build_system"
+   ],
+   "spread_by": "org",
+   "pool_exclusion_fields": [
+    "repo",
+    "repo_clone_url"
+   ],
+   "lead_requires": [
+    "repo_clone_url",
+    "fix_commit_hash",
+    "org",
+    "repo",
+    "clone_path",
+    "report_url",
+    "commit_message_excerpt",
+    "changed_test_path",
+    "changed_source_path",
+    "build_system",
+    "language",
+    "commit_count",
+    "has_issues",
+    "closed_bug_issues",
+    "stars",
+    "last_commit",
+    "is_fork"
+   ],
+   "lead_key": [
+    "repo_clone_url",
+    "fix_commit_hash"
+   ],
+   "normalize": {
+    "repo_clone_url": "git_url",
+    "fix_commit_hash": "full_sha"
+   },
+   "caps": [
+    {
+     "dimension": "per_repository",
+     "keys": [
+      "repo_clone_url"
+     ],
+     "limit": 3
+    },
+    {
+     "dimension": "per_organisation",
+     "keys": [
+      "org"
+     ],
+     "limit": 5
+    },
+    {
+     "dimension": "per_commit",
+     "keys": [
+      "repo_clone_url",
+      "fix_commit_hash"
+     ],
+     "limit": 1
+    }
+   ],
+   "found_enforces": [
+    "the lead names a Java, non-fork GitHub repository with >= 100 stars, >= 1000 commits, issues enabled, >= 20 closed bug-labelled issues, and a push within 12 months",
+    "the lead is identified by {repo_clone_url, fix_commit_hash} and that pair is unique across leads",
+    "the lead names a linked issue or merged pull request URL as bug evidence",
+    "the lead names one changed path under a test source root and one changed path outside every test source root",
+    "the lead names the build system and the absolute path of its own clone",
+    "the recorded commit-message excerpt is distinct across leads"
+   ],
+   "delivered_enforces": [
+    "the fix commit sha and its first parent resolve in the recorded clone, and buggy_commit is derived by the harness",
+    "the recorded commit-message excerpt is found verbatim in that commit's message",
+    "the tracker item at report_url resolves and reads as a bug per the declared vocabulary",
+    "both recorded paths appear in `git show --name-only` for that commit",
+    "the test path lies under a test source root and the source path does not, so a fix patch necessarily exists",
+    "a build marker for the declared build system is found in the clone"
+   ],
+   "search_hints": "Start from GitHub search for Java repositories meeting the admissibility clauses: GET https://api.github.com/search/repositories?q=language:Java+stars:>=100+pushed:>={snapshot-12mo}+fork:false, then verify each with GET /repos/{org}/{repo} (language, has_issues, stargazers_count, pushed_at, fork) and `git rev-list --count HEAD` in a full clone. Reject any repository on the Defects4J exclusion roster. Within an admitted repository, find candidate commits with `git log --grep='fix\\|bug\\|issue\\|#[0-9]' -i --name-only` and keep only commits that touch BOTH a path under the build tool's declared test source root AND a path outside it; confirm the bug claim by opening the linked issue (GET /repos/{org}/{repo}/issues/{n}) or the merged PR. Apache/Eclipse/Netflix/Google/square-style Maven, Gradle and Ant Java projects with JIRA or GitHub issues are the target class; avoid tutorial, sample, awesome-list, homework and Android-only UI repositories, and avoid any project already in Defects4J. Spread leads across distinct organisations rather than mining one repository deeply.",
+   "strategies": [
+    {
+     "kind": "issue_closing_commits",
+     "strategy": "For each admitted repo, list commits whose message references a closed bug-labelled issue ('Fixes #N', 'Closes #N', JIRA key), then keep those whose diff touches both test and non-test source."
+    },
+    {
+     "kind": "merged_pr_walk",
+     "strategy": "Walk GET /repos/{org}/{repo}/pulls?state=closed, keep merged PRs linked to a bug-labelled issue, and register the merge or squash commit sha as fix_commit_hash."
+    },
+    {
+     "kind": "test_touching_log_scan",
+     "strategy": "Run `git log --name-only --pretty=%H` and mechanically select commits with >=1 file under the test source root and >=1 file outside it, then screen their messages for bug vocabulary."
+    },
+    {
+     "kind": "jira_backed_projects",
+     "strategy": "For Apache-style projects using JIRA, search the tracker for issuetype=Bug + status=Resolved, extract the issue key, and grep git log for that key to locate the fix commit."
+    },
+    {
+     "kind": "org_breadth_sweep",
+     "strategy": "Enumerate organisations already producing one lead and move to a different organisation once its cap is reached, to satisfy the spread requirement."
+    }
+   ],
+   "mining_quality_gates": [
+    "Every delivered lead names an admissible non-Defects4J Java repository and a single fix commit sha, unique across leads.",
+    "Every delivered lead's bug claim is backed by a live tracker item or merged PR, not by the miner's prose alone.",
+    "Every delivered lead has been shown to touch both test and non-test source in that one commit, so no test-only commit can reach construction.",
+    "Delivered leads span at least 5 distinct organisations at the 15-20 instance scale.",
+    "No lead carries a value that would require running a build or extracting a diff; buggy_commit is derived by the harness, never typed."
+   ]
+  },
+  "report_discovery": {
+   "junit-xml": [
+    "*surefire-reports/TEST-*.xml",
+    "*failsafe-reports/TEST-*.xml",
+    "*build/test-results/*/TEST-*.xml",
+    "*test-results/TEST-*.xml",
+    "TEST-*.xml"
+   ]
+  }
+ }
+}

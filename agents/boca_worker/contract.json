@@ -1,0 +1,251 @@
+{
+ "verbs": {
+  "build": {
+   "args": [
+    "dir",
+    "flags"
+   ]
+  },
+  "run": {
+   "args": [
+    "dir",
+    "input"
+   ]
+  },
+  "gen_inputs": {
+   "args": [
+    "dir"
+   ]
+  },
+  "break": {
+   "args": [
+    "dir"
+   ]
+  }
+ },
+ "variants": {
+  "default": {
+   "setup": [
+    {
+     "verb": "build",
+     "args": {
+      "flags": "-O0"
+     }
+    }
+   ]
+  },
+  "optimized": {
+   "setup": [
+    {
+     "verb": "build",
+     "args": {
+      "flags": "-O3"
+     }
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "run",
+  "compare": "exact",
+  "reader": null,
+  "select": null
+ },
+ "checks": [
+  {
+   "verb": "run",
+   "compare": "exact",
+   "reader": null,
+   "select": null
+  }
+ ],
+ "oracle": {
+  "kind": "reference-equivalence"
+ },
+ "negative_control": {
+  "verb": "break",
+  "variant": "default",
+  "expect": "observable_changes",
+  "then": null
+ },
+ "solver_input": {
+  "verb": "build",
+  "arg": "flags",
+  "variant": "default",
+  "probe_values": [
+   "-O0",
+   "-O3"
+  ]
+ },
+ "measure": {
+  "inputs": "gen_inputs",
+  "repetitions": 5,
+  "floor_ms": 1000.0,
+  "ceiling_ms": 10000.0,
+  "min_ratio": 1.05,
+  "ratio_of": [
+   "default",
+   "optimized"
+  ]
+ },
+ "predicates": [
+  {
+   "run": "git -C /work/repo rev-parse --verify {commit_sha}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test -f /work/repo/{build_file}",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "build": "compile the program named by program_name into <dir> with CFLAGS=<flags> exported (overriding any optimization level the project's own build file hardcodes), leaving a runnable executable inside <dir>; exit 0 when it built and print nothing on stdout that matters (build logs go to stderr)",
+  "run": "run <dir>'s built executable on the single reference input file <input> and print exactly the program's own output on stdout and nothing else (timings, banners and progress go to stderr)",
+  "gen_inputs": "deterministically generate several reference input files of rising computational cost into <dir> by scaling parameters of the program's own domain (never downloading anything), the smallest being the one the setup was proven on and the costliest sized so the -O0 build takes 1-10 seconds on it",
+  "break": "corrupt the computation of the executable already built in <dir> (patch a constant it depends on and rebuild, or replace the binary with one that computes something else) so that run.sh's stdout on the same input differs from before"
+ },
+ "_stages": [
+  {
+   "name": "install the toolchain, clone the commit and locate the build recipe",
+   "files": [
+    "Dockerfile",
+    "setup.sh",
+    "instance.json"
+   ],
+   "goal": "The search handed over only repo_url, commit_sha and program_name. In the Dockerfile install a C compiler and every library and build tool this project's own instructions name (autotools, cmake, make, headers); in setup.sh clone repo_url at commit_sha into /work/repo. You must ESTABLISH build_file yourself: read the repository at that commit and record the path, relative to /work/repo, of the build file that actually produces program_name (Makefile, CMakeLists.txt, configure.ac, or the one inside the subdirectory where that program lives), and write repo_url, commit_sha, program_name, build_file and builder_notes into instance.json. Install every dependency in the Dockerfile, not by hand in your scratch container.",
+   "done_when": "the image builds, setup.sh exits 0 in a fresh container, and instance.json carries repo_url, commit_sha, program_name and a build_file that the identity predicates find in the clone at that commit",
+   "verbs": [],
+   "rows": [
+    "replays",
+    "identity"
+   ]
+  },
+  {
+   "name": "write a build that honours CFLAGS",
+   "files": [
+    "build.sh"
+   ],
+   "goal": "build.sh copies or configures the source into <dir> and compiles program_name there with the flags it is given, exported as CFLAGS and forced on the command line (make CFLAGS=... , or a configure invocation) so a Makefile that hardcodes -O2 cannot win. It is run once with -O0 and once with -O3 into two different random directories, and later with a solver's flag string, so it must never assume a fixed path and must not reuse stale objects between calls.",
+   "done_when": "both variants compile in the fresh container and the -O0 and -O3 builds produce different binaries",
+   "verbs": [
+    "build"
+   ],
+   "rows": [
+    "variants_build"
+   ]
+  },
+  {
+   "name": "run the program, generate inputs and break it on purpose",
+   "files": [
+    "run.sh",
+    "gen_inputs.sh",
+    "break.sh"
+   ],
+   "goal": "Pick the invocation where this program spends its time on its OWN computation over data it reads (compress, hash, parse, search, transform, solve), not on startup, disk or a fixed sleep, and make it deterministic (fixed seeds, no timestamps, no thread count in the output); mask whatever varies, because the outputs are compared BYTE FOR BYTE as digest equality. run.sh prints only the program's output. gen_inputs.sh writes several deterministic inputs of rising cost, generated from the program's domain, small at this stage. break.sh corrupts the computation of the build in <dir> so the same input yields different output.",
+   "done_when": "run.sh's output is byte-identical across three consecutive runs, differs between inputs, matches byte for byte between the -O0 and the -O3 variant, and changes after break.sh",
+   "verbs": [
+    "run",
+    "gen_inputs",
+    "break"
+   ],
+   "rows": [
+    "inputs",
+    "stable",
+    "input_sensitive",
+    "oracle",
+    "can_fail"
+   ]
+  },
+  {
+   "name": "grow the costliest input into the timing band",
+   "files": [],
+   "goal": "Scale gen_inputs.sh's largest input until the -O0 build's median over 5 runs on it is between 1 and 10 seconds AND is at least 1.05x the -O3 build's median there. If the curve is flat, the time is going to startup or I/O rather than to the optimizer's work: try a workload of a different KIND (more computation per byte, less I/O) before setting the program aside, and record every trial, all repetition timings with mean, median and coefficient of variation, and the exception field (literally `none` when the band was met) in builder_notes.",
+   "done_when": "the costliest input's default-variant median lies inside 1000-10000 ms with a default/optimized ratio of at least 1.05, and builder_notes states the numbers and the exception value",
+   "verbs": [],
+   "rows": [
+    "solver_input",
+    "in_band",
+    "separates"
+   ]
+  }
+ ],
+ "_draw_notes": [],
+ "_instance_fields": [
+  "repo_url",
+  "commit_sha",
+  "program_name",
+  "build_file"
+ ],
+ "_numbers_quoted": {
+  "floor_ms": "The costliest input must bring the default build's median runtime to at least 1 second (median over at least 5 runs)",
+  "ceiling_ms": "and to at most 10 seconds",
+  "min_ratio": "the default build's median on the costliest input must be at least 1.05 times the -O3 build's median there (a 5% separation)",
+  "repetitions": "Runtime is the median of at least 5 reruns",
+  "compare": "Comparison method: byte-identical output, checked as digest equality"
+ },
+ "_identity_fields": [
+  "repo_url",
+  "commit_sha",
+  "program_name"
+ ],
+ "_stage_sections": [
+  {
+   "where_you_are": "You are building one instance of a compiler-autotuning benchmark: a small directory of scripts that rebuilds the whole thing from nothing in a fresh container, so that one C program at one commit can later be compiled with different optimization flags and compared against itself. The instance is identified by a repository URL, a commit hash and a program name, and those three things are all you arrive with. Nothing exists yet: no Dockerfile, no clone, no instance.json, and /work/repo does not exist on your machine unless you create it by running your own setup script there.",
+   "goal": "In this stage you make the source reachable and the toolchain complete. Write a Dockerfile that installs a C compiler and every library, header and build tool this project's own instructions name, and a setup.sh that clones repo_url and checks out exactly commit_sha into /work/repo. Then read the repository at that commit and work out for yourself which build file actually produces program_name — a top-level Makefile, a CMakeLists.txt, a configure.ac, or one inside the subdirectory where that program lives — and put repo_url, commit_sha, program_name, that build_file path relative to /work/repo, and builder_notes into instance.json. Everything later depends on this: a build recipe that honours exported CFLAGS can only be written against the right file.",
+   "traps": [
+    "Do not assume the root Makefile is the answer: many C projects put the program you were given under src/, tools/ or a subproject with its own Makefile.am or CMakeLists.txt, so grep the tree for the program name as a target or an install rule and name the file that really produces it.",
+    "Do not install packages by hand inside a scratch container to get the clone to work; every apt package, every -dev header and every autotools or cmake dependency must appear in the Dockerfile, because the container that matters is built from that file alone and nothing else survives.",
+    "Do not clone only the default branch tip or use a shallow clone that cannot reach commit_sha; fetch the full history or fetch that specific object, then check it out detached, so the instance is pinned to one commit rather than to whatever HEAD happens to be.",
+    "Do not let setup.sh do more than fetch the source into /work/repo — no ./configure, no make, no bootstrap that writes generated files — since the build has to be re-run later with different flags from a clean state.",
+    "Do not treat a project that autogenerates its Makefile (autoreconf, configure.ac, CMakeLists.txt) as having no build file: record the file the project's own instructions start from, and make sure the tools that generate from it, including pkg-config and any -dev libraries it probes for, are in the Dockerfile.",
+    "Do not paper over a clone that fails or a program name you cannot find any build rule for; that candidate is not usable, and dropping it with its reason through the tool you are given is the right move, not guessing at a plausible build file."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of a compiler-autotuning benchmark: a small directory of scripts that rebuilds the whole thing from nothing, so that the same C program at the same commit can be compiled under different flag configurations and compared. You arrive with a repo URL, a commit hash and a program name, and you have found the project's build file for yourself. The earlier stage established that the container builds from your Dockerfile and that setup.sh runs, and that the commit and its files exist. Nothing has been compiled yet, and no program has been run.",
+   "goal": "Write build.sh <dir> <flags> so that it produces a runnable executable for program_name inside <dir>, compiled with exactly the flags it was handed. The same script is called once with -O0 and once with -O3, into two different directories, and later with whatever flag string a solver proposes, so the flags must actually reach the compiler instead of being overridden by whatever optimization level the project's own build file prefers. This is the basis of the benchmark's measurement: if -O0 and -O3 silently compile the same way, the two versions cannot differ in runtime and the instance is worthless.",
+   "traps": [
+    "Exporting CFLAGS alone often loses to a makefile that assigns CFLAGS with = or appends its own -O2 later, so force the flags on the command line too (make CFLAGS=\"$2\", or ./configure CFLAGS=\"$2\"), read the compile lines in the build log to confirm your -O0 or -O3 is the last optimization flag on them, and patch the makefile inside <dir> with sed if the project appends after you.",
+    "Building in /work/repo and copying the binary out makes the second call reuse the first call's object files and yields two identical programs, so copy the source tree into <dir> fresh on every call (cp -a /work/repo/. \"$1\"/) and build there.",
+    "Hardcoding a path like /work/build breaks the script because <dir> is a different directory each time, so derive everything from \"$1\" and leave the executable at a predictable place inside it that a later call can find without searching.",
+    "A configure- or cmake-based project will pick its own defaults if you let it, so pass the flags through ./configure CFLAGS=\"$2\" or use -DCMAKE_C_FLAGS with an empty CMAKE_BUILD_TYPE, since a Release build type injects -O3 and would make your -O0 version fast.",
+    "When the project produces several executables and libraries, name the target explicitly so build.sh compiles program_name, and exit non-zero if that executable is missing at the end rather than exiting 0 after a make that skipped it.",
+    "Keep stdout clean by sending make and configure chatter to stderr (exec 1>&2 near the top is the simplest way), and if the build needs headers, autotools or a library that is absent, add it to the Dockerfile or setup.sh now, because the fresh container has only what those two files put there."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of a compiler-autotuning benchmark: a directory of scripts that rebuilds the whole thing from nothing in a fresh container, so that a flag configuration can later be handed in and turned into a runtime and a correctness verdict. You arrived with a repository URL, a commit hash and a program name, and you found the project's build file yourself. Earlier stages got the container building and setup.sh running, confirmed the commit and the files exist under /work/repo in the fresh container, and got build.sh producing both versions, default with -O0 and optimized with -O3, each into its own directory. Nothing else exists yet: no invocation, no inputs, no way to break the program.",
+   "goal": "In this stage you decide how this program is actually run and what it is run on. Write run.sh so it takes one built directory and one input file and prints exactly the program's own output on stdout, deterministically, with everything else on stderr. Write gen_inputs.sh so it writes several input files of rising computational cost into a directory, generated from the program's own domain, beginning with the small input the setup was proven on. Write break.sh so it corrupts the computation of the build in the given directory and the same input then yields different output. This is what makes the instance's oracle work: byte-identical output is the correctness signal, and the costliest input is where a flag difference becomes visible at all.",
+   "traps": [
+    "Programs like these often print a banner, a version string, a timestamp, elapsed seconds or a thread count, and since outputs are compared byte for byte, you must suppress that with a quiet flag, filter it out in run.sh, or choose an output mode (a checksum, a decoded stream, a solved result) that carries none of it.",
+    "Do not let run.sh choose or hardcode an input file: it gets one file as its second argument and must feed exactly that file into the program's real computation, on the command line or on stdin.",
+    "Do not let run.sh echo the input or print a fixed summary that ignores it, because the output has to actually change when the input changes.",
+    "Do not build inputs by downloading a corpus or by reading /dev/urandom, and instead generate them deterministically in the program's own domain with a fixed seed (a few lines of C, awk or a repeated and permuted text corpus) so the same bytes appear on any machine.",
+    "Do not size the costliest input by byte count alone, since a huge file makes every run disk-bound and hides the -O0 versus -O3 difference; raise the work per byte instead (more iterations, a higher level, a harder instance) and keep the file small enough to stay in the page cache.",
+    "Do not write break.sh so it merely deletes or truncates the executable, leaving run.sh with no output at all, and instead patch a constant or table the result depends on and rebuild into the same directory with the same flags, or overwrite that directory's binary with one that computes something else, keeping a fresh build.sh run in a clean directory honest."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of this compiler-autotuning benchmark: a small directory of scripts that rebuilds the whole thing from nothing on a blank machine. The candidate arrived as a repository URL, a commit hash and a program name, and you found its build file. Earlier stages got you here: the container builds and setup.sh runs, the commit and its files exist, build.sh produces both the default and the optimized version, gen_inputs.sh writes inputs, run.sh prints the same output on every run and a different output when the input changes, both versions print the same output, and break.sh makes the default build print something different.",
+   "goal": "Now make the workload big enough, and computational enough, to be worth timing. Grow the largest input gen_inputs.sh writes until the default (-O0) build's median over five runs on it lands between 1 and 10 seconds, and until that median is at least 1.05 times the optimized (-O3) build's median on the same input. That ratio is the point of the instance: it is the evidence that the time goes into the program's own computation, which is what an optimizer acts on. A flat curve means the seconds go to startup, file reading or waiting, and an instance built on that cannot rank flag configurations.",
+   "traps": [
+    "Do not chase the band by making the input file enormous: a multi-gigabyte corpus falls out of the page cache and every run becomes I/O-bound, flattening the -O0/-O3 ratio even as the runtime rises, so prefer a moderate input the program works over harder or repeatedly, keeping the bytes cached and the arithmetic dominant.",
+    "Do not stop the moment the median crosses one second: a second spent in process startup and file reading separates at 1.00x, and if the ratio is flat you must try a workload of a different kind through gen_inputs.sh, and run.sh if the invocation needs changing -- more computation per byte, a harder parameter, more rounds -- before concluding the program is flag-insensitive and dropping it.",
+    "Do not let build.sh drift back to the project's own defaults while you tune inputs: many of these makefiles hardcode -O2 or -Os, and if the exported CFLAGS is ignored the two versions are the same binary and the ratio sits at 1.00x for reasons that have nothing to do with the workload.",
+    "Do not aim just under ten seconds for margin; the costliest input is re-run many times, so target the middle of the band, roughly two to four seconds, where a slow machine will not push you out of it.",
+    "Do not add timings, progress bars or byte counts to run.sh's stdout while you tune; it must still print the program's result and nothing else, with any diagnostics on stderr, or the comparison between the two versions breaks.",
+    "Do not reintroduce nondeterminism as you grow the input -- an unseeded random corpus, a size derived from the clock, or a program that prints elapsed time or thread counts only at larger sizes -- and keep gen_inputs.sh writing several inputs of rising cost, the small one you started from included."
+   ]
+  }
+ ],
+ "_drawn": {
+  "spec": "specs/boca/spec.yaml",
+  "spec_sha256": "98d217a4292d164fd12aadbc684f6219fc3bc07f77ee8e3deff6cb792ddb30a3",
+  "canonical": "specs/boca/canonical.json",
+  "identity": [
+   "repo_url",
+   "commit_sha",
+   "program_name"
+  ]
+ }
+}

@@ -1,0 +1,409 @@
+{
+ "outcome": "ACCEPT",
+ "canonical_spec": {
+  "spec_id": "19c27581b5e2",
+  "task": "Given a Java project at a revision where SonarQube reports one specific warning, edit the project so that the same SonarQube instance (same version, same active rules) no longer reports that warning at that file and line, without introducing warnings of new rules in the files the edit touched. SonarQube's own report is the entire verdict; no tests are run and no human or model judges the answer.",
+  "instance_input": "A checked-out working directory of the project at the violating revision, with dependencies pre-fetched and offline-buildable, plus the warning identity (rule key e.g. java:S1234, file path, line, project, revision) and the warning's type and severity; the instance ships both revisions, the recorded SonarQube warning lists at each, the exact compile and analyze commands, the enclosing declaration of the warning, and check.sh.",
+  "instance_output": "An edited project tree (in-place edits to {clone_path}) that, when compiled and analyzed by the instance's own SonarQube, no longer reports the recorded warning at that file and line.",
+  "data_source": "Public GitHub Java repositories built with Maven or Gradle; commits whose message states a SonarQube warning was fixed and names the rule, located via git history and GitHub commit search.",
+  "candidate_definition": "ONE INSTANCE = one SonarQube warning identified by (rule key, file, line, project, revision), harvested from one repository commit (head_sha) whose message says a warning was fixed and names the rule, where the violating revision is the commit's parent (or a nearby earlier revision) and the fixed revision is head_sha (or a few commits on); the two revisions need not be parent and child. One commit may clear several warnings; the builder records that and keeps exactly one as the instance's target. The diff between the two revisions is kept verbatim as the reference answer and may carry unrelated edits.",
+  "oracle_strategy": "execution-replay",
+  "oracle_detail": "The instance ships a self-contained Docker-buildable directory holding SonarQube Community Build 25.5.0.107428 (https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-25.5.0.107428.zip) and sonar-scanner-cli 7.0.2.4839 (https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-7.0.2.4839-linux-x64.zip), those URLs as written, with project dependencies pre-fetched so nothing reaches the network and analysis goes only to the in-instance SonarQube, never SonarCloud. `sh check.sh .` compiles the candidate tree with the recorded compile command, runs the recorded scanner command against the in-instance server, waits for the analysis task to finish, reads the resulting issue list, and exits 0 only if ALL THREE hold: (1) no issue with the recorded rule key exists at the recorded file and line; (2) the project still compiles, every edited file still parses, and the recorded enclosing method or class declaration still exists; (3) for the set of files the candidate edit touched, no issue appears whose rule key was not already present in that file's baseline issue list at the violating revision (new issues in untouched files do not fail the answer). Behaviour is not checked and no test suite is run. The shipped check is demonstrated able to both fail and pass: it exits nonzero at the violating revision and zero at the developer's fixed revision; applying the reference patch to the violating revision flips the verdict to pass, applying an empty patch does not; and reverting the developer's change inside the fixed revision flips the verdict back to fail.",
+  "interface": "Consumer asks for an instance by id, receives the project at the violating revision as a workdir plus the warning identity, edits the tree in place, and asks whether it worked. The answer reports three booleans: warning gone, enclosing declaration still present, no new-rule warnings in touched files. The instance directory rebuilds from nothing on a machine with only Docker installed.",
+  "scale": {
+   "instance_count": "~50 instances, spread across rules: at most 15 instances on any one SonarQube Java rule",
+   "compute_budget": "unbounded; minutes per instance of build + analysis time is acceptable",
+   "human_budget": "zero — fully automated end-to-end; no human labeling or review in the oracle or the pipeline"
+  },
+  "criteria": [
+   "Both the violating and the fixed revision compile offline inside the instance image with the recorded build command and the pre-fetched dependency cache.",
+   "The shipped check.sh exits nonzero at the violating revision and zero at the fixed revision, verified by the builder with the observed exit codes recorded.",
+   "The recorded warning (rule key, file, line) appears in the SonarQube issue list at the violating revision and is absent from the issue list at the fixed revision, both lists shipped with the instance.",
+   "Applying the reference patch (the developer's diff between the two revisions) to the violating revision makes check.sh pass; applying an empty patch leaves it failing.",
+   "Reverting the developer's change inside the fixed revision makes check.sh fail again (negative control executed by the builder).",
+   "The instance records the exact SonarQube version, scanner version, active rule set/quality profile, and the exact compile and analyze commands used, and the check re-uses exactly those.",
+   "The enclosing method or class declaration containing the warning is recorded verbatim so criterion (2) of the oracle is decidable.",
+   "The instance analyzes only against the in-instance SonarQube server; no network access occurs during checking.",
+   "The builder's own verification record ships with the instance, including the numbers it observed (issue counts at both revisions, exit codes of every demonstration run)."
+  ],
+  "quality_gates": [
+   "reproducibility: re-verify a sample of instances across 3 clean-environment reruns, requiring identical check verdicts",
+   "corruption sensitivity: a deliberately corrupted instance (negative control — developer's change reverted in the fixed revision) must be rejected by the pipeline's own gates",
+   "deduplication: near-duplicate instances removed (same repository + same rule + overlapping file, and identical reference diffs)",
+   "the shipped scripts run on a fresh Docker-only machine without crashing",
+   "rule spread enforced: no more than 15 shipped instances carry the same rule key"
+  ],
+  "examples": [
+   {
+    "valid": true,
+    "description": "A Maven Java repo (>=1000 stars, not a fork, pushed within 6 months) has commit abc123 'Fix sonar java:S2259 possible NPE in Parser.java'. It has a parent, its diff modifies the existing src/main/java/.../Parser.java, and the message names java:S2259. The builder analyzes parent and head with SonarQube 25.5.0.107428: java:S2259 at Parser.java:412 is present at the parent and absent at head. Instance target = that warning."
+   },
+   {
+    "valid": false,
+    "description": "A commit whose message mentions sonar but which only ADDS new .java files and modifies none — refused at the corroboration gate before any clone-build cost is paid."
+   }
+  ],
+  "constraints": [
+   "Use the two download URLs exactly as written; do not guess a version number. Other SonarQube versions (9.9.5.90326, 9.9.0.65486) return 403 and must not be used. The scanner archive suffix is -linux-x64.zip from 6.x onward and -linux.zip up to 5.x.",
+   "Any SonarQube Java rule is eligible; there is no rule allow-list and no rule exclusions.",
+   "The search hands the builder exactly two fields, spelled exactly: clone_url and head_sha. These names must not be renamed. Every other instance field is established by the builder.",
+   "The search may use git alone — no analyzer run and no build — when screening candidates.",
+   "Analysis must target the SonarQube server inside the instance; SonarCloud is forbidden.",
+   "No test execution and no behavioural assessment anywhere in the oracle.",
+   "Exclusion roster: none named by this spec."
+  ],
+  "assumptions": [
+   {
+    "field": "admissibility",
+    "resolved_to": "\"popular\" => stargazers_count >= 1000",
+    "reason": "term-table default for 'popular' on a source with a star concept (GitHub)"
+   },
+   {
+    "field": "admissibility",
+    "resolved_to": "\"actively maintained\" => pushed_at within 6 months",
+    "reason": "term-table default for 'active' (at least one commit within the last 6 months of the population snapshot), observed through the repository's pushed_at timestamp"
+   },
+   {
+    "field": "admissibility",
+    "resolved_to": "\"builds with Maven or Gradle\" => a single GET /repos/{org}/{project}/git/trees/HEAD call yields the boolean has_maven_or_gradle_build_file, true iff the root tree lists pom.xml, build.gradle or build.gradle.kts",
+    "reason": "one API call, one deterministic boolean: two people running it record the same value. The spec forbids the finder from building, so the presence of a root build file is the only observable build-tool fact"
+   },
+   {
+    "field": "admissibility",
+    "resolved_to": "no clause screens whether a project's history contains warning-removing commits",
+    "reason": "the spec states explicitly that this is not screened for at source level and is the first thing the builder measures"
+   },
+   {
+    "field": "admissibility",
+    "resolved_to": "no license clause emitted",
+    "reason": "the spec names no license set; choosing one would be authoring the researcher's call"
+   },
+   {
+    "field": "scale",
+    "resolved_to": "instance_count = 50; per-rule cap = 15",
+    "reason": "stated verbatim in the raw spec"
+   },
+   {
+    "field": "sampling.caps",
+    "resolved_to": "the per-rule cap of 15 is enforced at construction, not at the lead gate; the lead gate caps repositories at 3 leads",
+    "reason": "the spec permits the search to record only clone_url and head_sha, so the rule key is not a lead field and cannot be capped at mining time; a per-repository cap preserves spread across projects"
+   },
+   {
+    "field": "sampling.lead_requires",
+    "resolved_to": "clone_path and excerpt_grep_cmd are carried as harness-local gate fields in addition to clone_url and head_sha",
+    "reason": "corroboration run steps must anchor to a recorded clone location, and a verbatim excerpt is proven by handing a recorded command to a shell whole rather than quoting a placeholder; neither is an instance field and neither renames the two handed-off fields"
+   },
+   {
+    "field": "quality",
+    "resolved_to": "default quality gates added (reproducibility across 3 clean reruns, corruption sensitivity, deduplication)",
+    "reason": "the raw spec declared no quality block"
+   },
+   {
+    "field": "interface",
+    "resolved_to": "\"a few commits on\" => the fixed revision is head_sha or a descendant within 5 commits of head_sha on the same branch",
+    "reason": "narrow reading of an unquantified but low-stakes phrase; recorded rather than left open"
+   },
+   {
+    "field": "sampling.normalize",
+    "resolved_to": "clone_url normalized as git_url, head_sha as full_sha; non-key fields are not normalized",
+    "reason": "case, a trailing slash and a .git suffix do not change repository identity; a short sha and a full sha name the same commit"
+   }
+  ],
+  "delegations": [],
+  "admissibility": [
+   {
+    "name": "language",
+    "observe": "GET /repos/{org}/{project} -> language",
+    "require": "one of [java]"
+   },
+   {
+    "name": "is_private",
+    "observe": "GET /repos/{org}/{project} -> private",
+    "require": "is false"
+   },
+   {
+    "name": "is_fork",
+    "observe": "GET /repos/{org}/{project} -> fork",
+    "require": "is false"
+   },
+   {
+    "name": "stargazers_count",
+    "observe": "GET /repos/{org}/{project} -> stargazers_count",
+    "require": ">= 1000"
+   },
+   {
+    "name": "pushed_at",
+    "observe": "GET /repos/{org}/{project} -> pushed_at",
+    "require": "within 6 months"
+   },
+   {
+    "name": "has_maven_or_gradle_build_file",
+    "observe": "GET /repos/{org}/{project}/git/trees/HEAD -> true if any element of tree[].path is one of pom.xml, build.gradle, build.gradle.kts, else false",
+    "require": "is true"
+   }
+  ],
+  "artifact_variants": [
+   {
+    "name": "violating",
+    "description": "the revision that has the warning; the check must say no here",
+    "check_cmd": "sh check.sh .",
+    "expect": "fail",
+    "results": "none",
+    "results_none_reason": "SonarQube's own report is the evidence; no tests run"
+   },
+   {
+    "name": "fixed",
+    "description": "the later revision where the developer's change removed it; the check must say yes here",
+    "check_cmd": "sh check.sh .",
+    "expect": "pass",
+    "results": "none",
+    "results_none_reason": "SonarQube's own report is the evidence; no tests run"
+   }
+  ],
+  "solver_input": {
+   "kind": "workdir",
+   "path": "{clone_path}",
+   "describes": "the solver edits the checked-out project that has the warning; the check compiles it, re-runs SonarQube over it and answers"
+  },
+  "negative_control": {
+   "break_cmd": "corruption_cmd",
+   "restore_cmd": "restore_cmd",
+   "check": "fixed",
+   "describes": "undo the developer's change in the fixed revision, so SonarQube reports the warning again and the verdict goes back to no"
+  },
+  "entry_contract": [
+   {
+    "field": "clone_url",
+    "require": "is a clone url",
+    "teach": "the repository's git clone URL, e.g. https://github.com/{org}/{project}.git — do not substitute the web page URL or an SSH remote"
+   },
+   {
+    "field": "head_sha",
+    "require": "is a git sha",
+    "teach": "the full 40-hex sha of the commit whose message says a SonarQube warning was fixed and names the rule; read it from `git log` or the commits API, not from a tag or branch name"
+   },
+   {
+    "field": "head_sha",
+    "require": "is distinct across leads",
+    "teach": "one lead per commit"
+   },
+   {
+    "field": "clone_path",
+    "require": "is a plain absolute path",
+    "teach": "record the absolute path where you cloned this repository; every gate command runs against it"
+   },
+   {
+    "field": "org",
+    "require": "is an atomic name",
+    "teach": "the GitHub owner/organisation login exactly as the API returns it"
+   },
+   {
+    "field": "project",
+    "require": "is an atomic name",
+    "teach": "the GitHub repository name exactly as the API returns it"
+   },
+   {
+    "field": "language",
+    "require": "one of [java]",
+    "teach": "GET /repos/{org}/{project} -> language"
+   },
+   {
+    "field": "is_fork",
+    "require": "is false",
+    "teach": "GET /repos/{org}/{project} -> fork; forks are not admissible"
+   },
+   {
+    "field": "is_private",
+    "require": "is false",
+    "teach": "GET /repos/{org}/{project} -> private"
+   },
+   {
+    "field": "stargazers_count",
+    "require": ">= 1000",
+    "teach": "GET /repos/{org}/{project} -> stargazers_count; 'popular' is resolved to >= 1000 stars"
+   },
+   {
+    "field": "pushed_at",
+    "require": "within 6 months",
+    "teach": "GET /repos/{org}/{project} -> pushed_at; 'actively maintained' is resolved to pushed within the last 6 months"
+   },
+   {
+    "field": "has_maven_or_gradle_build_file",
+    "require": "is true",
+    "teach": "GET /repos/{org}/{project}/git/trees/HEAD and record true iff some tree[].path is pom.xml, build.gradle or build.gradle.kts; otherwise false and the repository is not admissible"
+   },
+   {
+    "field": "commit_message_excerpt",
+    "require": "is distinct across leads",
+    "teach": "copy VERBATIM the line of this commit's message that says a warning was fixed and names the rule (e.g. 'fix sonar java:S2259'); a generic sentence repeated across leads is a template, not an observation, and is refused"
+   },
+   {
+    "field": "excerpt_grep_cmd",
+    "require": "is distinct across leads",
+    "teach": "record the one-line shell command that proves your excerpt is really in that commit's message, to be handed to a shell inside your clone, e.g. git log -1 --format=%B <head_sha> | grep -Fq -- 'fix sonar java:S2259'; it must exit zero"
+   }
+  ],
+  "exclusions_on": [
+   "clone_url",
+   "project",
+   "org"
+  ],
+  "corroboration_contract": [
+   {
+    "field": "clone_path",
+    "require": "is non-empty",
+    "teach": "record where you cloned this repository; every step below runs inside it"
+   },
+   {
+    "run": "git -C {clone_path} rev-parse --verify {head_sha}^{commit}",
+    "require": "output is a git sha",
+    "derive": "resolved_head_sha",
+    "teach": "the recorded head_sha must exist in the clone you registered"
+   },
+   {
+    "run": "git -C {clone_path} rev-parse --verify {head_sha}^1^{commit}",
+    "require": "output is a git sha",
+    "derive": "parent_sha",
+    "teach": "the candidate commit must have a parent; a root commit cannot supply a violating revision"
+   },
+   {
+    "run": "git -C {clone_path} diff --name-only --diff-filter=M {parent_sha} {head_sha} -- *.java",
+    "require": "exit zero and some output line",
+    "teach": "the commit must MODIFY at least one pre-existing .java file; a commit that only adds new .java files is not recorded"
+   },
+   {
+    "run": "git -C {clone_path} show {head_sha}",
+    "require": "output matches (?i)(sonar|squid|java:S[0-9]+)",
+    "teach": "the commit message or its diff must name sonar, squid, or a rule id like java:S1234"
+   },
+   {
+    "run": "cd {clone_path} && sh -c {excerpt_grep_cmd}",
+    "require": "exit zero",
+    "teach": "the recorded command must find your excerpt verbatim in that commit's message; a paraphrase will not be found"
+   },
+   {
+    "run": "git -C {clone_path} ls-files pom.xml build.gradle build.gradle.kts",
+    "require": "exit zero and some output line",
+    "teach": "the clone must carry a top-level Maven or Gradle build file; no build is run at this stage"
+   }
+  ],
+  "corroboration_accept": "{clone_url} at {head_sha} has parent {parent_sha}, modifies an existing .java file, names a SonarQube rule in its message or diff ({commit_message_excerpt}), and carries a Maven or Gradle build file — delivered for construction.",
+  "sampling": {
+   "pool_requires": [
+    "org",
+    "project",
+    "clone_url",
+    "language",
+    "stargazers_count",
+    "pushed_at",
+    "is_fork",
+    "is_private",
+    "has_maven_or_gradle_build_file"
+   ],
+   "spread_by": "org",
+   "pool_exclusion_fields": [
+    "project",
+    "clone_url"
+   ],
+   "lead_requires": [
+    "clone_url",
+    "head_sha",
+    "clone_path",
+    "org",
+    "project",
+    "language",
+    "is_fork",
+    "is_private",
+    "stargazers_count",
+    "pushed_at",
+    "has_maven_or_gradle_build_file",
+    "commit_message_excerpt",
+    "excerpt_grep_cmd"
+   ],
+   "lead_key": [
+    "clone_url",
+    "head_sha"
+   ],
+   "normalize": {
+    "clone_url": "git_url",
+    "head_sha": "full_sha"
+   },
+   "caps": [
+    {
+     "dimension": "per_repository",
+     "keys": [
+      "clone_url"
+     ],
+     "limit": 3
+    },
+    {
+     "dimension": "per_org",
+     "keys": [
+      "org"
+     ],
+     "limit": 5
+    },
+    {
+     "dimension": "per_commit",
+     "keys": [
+      "clone_url",
+      "head_sha"
+     ],
+     "limit": 1
+    }
+   ],
+   "found_enforces": [
+    "clone_url is a clone URL and head_sha is a full git sha; these two names are never renamed",
+    "repository is a public, non-fork Java repository with >= 1000 stars and pushed within 6 months",
+    "has_maven_or_gradle_build_file is true, observed by one GET /repos/{org}/{project}/git/trees/HEAD call",
+    "the recorded commit-message excerpt is verbatim and distinct across leads, and a matching grep command is recorded with it"
+   ],
+   "delivered_enforces": [
+    "head_sha resolves inside the registered clone",
+    "the commit has a parent",
+    "the commit's diff modifies at least one pre-existing .java file",
+    "the commit message or diff names sonar, squid, or a java:S#### rule id",
+    "the recorded excerpt is found verbatim in the commit's message by the recorded command",
+    "a Maven or Gradle build file is tracked at the clone root; no build and no analyzer run at this stage"
+   ],
+   "search_hints": "Look on GitHub. (1) Build the source pool from GET /search/repositories?q=language:Java+stars:>=1000+fork:false+pushed:>=<snapshot-6mo>, then confirm each entry with GET /repos/{org}/{project} (language, fork, private, stargazers_count, pushed_at) and GET /repos/{org}/{project}/git/trees/HEAD for the pom.xml / build.gradle / build.gradle.kts boolean. (2) Inside admissible repositories, find candidate commits with GET /search/commits?q=repo:{org}/{project}+sonar (and variants 'squid', 'java:S', 'sonarqube', 'sonar issue', 'quality gate'), or by cloning and running `git log -E --grep=java:S[0-9]` / `git log -i --grep=sonar`. Prefer repositories whose history visibly contains SonarQube-fix commits. (3) Verify with git alone — never build, never run an analyzer at the finding stage: the commit has a parent, its diff modifies an existing .java file, and sonar/squid/java:S#### appears in the message or diff. Steer toward application/library repositories with real Java source under src/main/java and away from tutorial, awesome-list, sample and android-only repositories that carry no Maven/Gradle JVM sources.",
+   "strategies": [
+    {
+     "kind": "commit-message-search",
+     "strategy": "For each admissible repository, query GET /search/commits with the repo qualifier and the keywords sonar, sonarqube, squid, 'java:S' and record every hit whose message names a rule id."
+    },
+    {
+     "kind": "local-git-grep",
+     "strategy": "Clone admissible repositories shallowly-unshallowed and run `git log -i --grep='sonar' --grep='squid' -E --grep='java:S[0-9]+'` to enumerate candidate commits that the commit-search index missed."
+    },
+    {
+     "kind": "sonar-config-first",
+     "strategy": "Use GitHub code search for sonar-project.properties, sonar.projectKey in pom.xml, or the sonarqube Gradle plugin to locate repositories that actually run SonarQube in CI, then mine their history for fix commits."
+    },
+    {
+     "kind": "rule-id-sweep",
+     "strategy": "Sweep a list of common Java rule ids (java:S1118, java:S1192, java:S2259, java:S106, java:S1854, ...) through GET /search/commits across the admissible pool so leads spread across rules rather than clustering on one."
+    },
+    {
+     "kind": "changelog-and-pr-titles",
+     "strategy": "Search merged pull request titles containing 'sonar'/'code smell'/'static analysis' in admissible repositories and register their merge or squash commits as candidates."
+    }
+   ],
+   "mining_quality_gates": [
+    "every delivered lead resolves its head_sha in a real clone and that commit has a parent",
+    "every delivered lead's commit modifies at least one pre-existing .java file",
+    "every delivered lead names sonar, squid or a java:S#### rule id in its message or diff",
+    "every delivered lead carries a verbatim, lead-distinct commit-message excerpt proven by its own recorded grep command",
+    "no more than 3 leads per repository and 5 per org; each (clone_url, head_sha) delivered once",
+    "no lead carries any built, analyzed or timed number — the finding stage neither builds nor runs SonarQube"
+   ]
+  },
+  "report_discovery": {
+   "sonarqube-issue-json": [
+    "*.scannerwork/report-task.txt",
+    "*sonar-issues*.json",
+    "*sonar-report*.json"
+   ]
+  }
+ }
+}

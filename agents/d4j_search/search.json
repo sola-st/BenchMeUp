@@ -1,0 +1,14 @@
+{
+ "spec": "specs/d4j/spec.yaml",
+ "spec_sha256": "4f3eded4901f38b98197044b1dceec6a63741350f4314ec1f6654c0dfbbab7a8",
+ "canonical": "specs/d4j/canonical.json",
+ "identity": [
+  "repo_clone_url",
+  "fix_commit_hash"
+ ],
+ "normalize": {
+  "repo_clone_url": "git_url",
+  "fix_commit_hash": "full_sha"
+ },
+ "target": 200
+}

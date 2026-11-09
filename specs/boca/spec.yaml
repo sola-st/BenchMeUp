@@ -1,0 +1,238 @@
+task: |
+  Given a C program and a target compiler, an automated compiler-autotuning technique
+  searches for an optimization-flag configuration that minimizes the program's runtime while
+  preserving its output behavior.
+
+instance: |
+  input: a C program's source; a set of reference inputs of increasing size (the small one
+  the setup was proven on, plus larger generated ones); the reference output and runtime of
+  the DEFAULT build, compiled with no optimization flags; and a set of reference
+  compilations -- the same program built with optimizing flags, at minimum -O3 -- each with
+  its own output and its own runtime on the largest input. The default build's output is the
+  functional reference; the reference compilations are the bar: the solver's configuration
+  must run faster than every one of them.
+  expected output: a chosen flag configuration and its measured runtime
+
+data: |
+  A real, public C codebase or program collection where a candidate can be built with a
+  standard compiler and produces a deterministic, reproducible output on some input --
+  which repositories to draw from is not pre-assigned: the builder finds and chooses
+  sources that meet the admissibility criteria below. The unit of instancehood is exact:
+  ONE instance = ONE program at ONE commit, identified by {repository URL, commit hash,
+  program}, where program is the name of the executable the build produces and the shell
+  invokes -- a repository that builds several programs can yield several candidates, together with its recorded reference inputs and reference
+  compilations. Reference compilations: at least the -O3 build; further optimizing
+  configurations are welcome; each is recorded with its flags, its output digest and its
+  runtime. Candidate = one such program that builds cleanly with NO optimization flags and
+  produces a reproducible reference output on a reference input, and that also builds and
+  runs under at least one optimizing configuration (including -O3) producing the SAME
+  output. The program is a RUNNABLE COMMAND-LINE PROGRAM: it builds into an executable, it
+  is started from a shell with its input given on the command line or on standard input, it
+  writes its result to standard output, and it exits by itself. A library source file, a kernel module, firmware, a code generator, a
+  network server or client, and a program that needs a display are NOT candidates, whatever
+  the repository is. What makes a program a good source here is where its time
+  goes: the work must be the program's OWN computation on data it holds -- compressing,
+  hashing, parsing, searching, transforming, solving -- because that is the work a compiler's
+  optimizer acts on. A program whose time goes to process startup, to waiting on disk or a
+  network peer, or to a fixed sleep is a poor source however popular it is, and a daemon or a
+  client whose work happens on someone else's machine is not a source at all.
+
+  WHO DOES WHAT. Finding sources and building instances are two jobs, and the first one is
+  CHEAP ON PURPOSE. Whoever finds sources screens them from what each repository says about
+  itself: its metadata (language, history, activity), the presence of documented build
+  instructions or a standard build file, and its own README and documentation describing
+  what the program does with the data it is given. On that evidence a source is proposed
+  when the program plausibly spends its time on its own computation over an input it reads
+  -- compressing, hashing, parsing, searching, transforming, solving -- and is set aside
+  when the documentation describes a network daemon or client, a GUI, a program whose work
+  happens elsewhere, or a project whose own instructions do not say how to build it. A
+  proposed source names the repository, the commit, the program (the executable's name and
+  how it is invoked), and where the
+  build instructions were found; it carries NO timings and NO build of its own, because
+  nothing is compiled or measured at this stage. The screening evidence is quoted, not
+  summarised: the proposer records the line of the project's own documentation that shows
+  how it is built, and the sentence of that documentation describing the computation the
+  program performs on the data it is given, each copied verbatim from a named file in the
+  repository so that whoever receives the proposal can find it there unchanged. Fetching
+  the repository to read those files is expected; compiling it is not. Everything else -- cloning, building under
+  each configuration, generating the reference inputs, timing them, and every criterion
+  below -- is the builder's work on the proposed source, and a proposed source that turns
+  out not to satisfy the criteria is a normal and expected loss there, not a failure of the
+  screening.
+
+correctness: |
+  Reference-equivalence, fully automated; no human judgment at construction or evaluation
+  time. The reference output is captured from the DEFAULT build (no optimization flags) on
+  each reference input and stored with the instance as a sha256 digest; its stability is
+  verified at construction: identical digest across at least 3 consecutive runs. To judge a
+  candidate flag configuration: compile the program with those flags, run it on the
+  reference input, and compare the output to the stored reference. Comparison method:
+  byte-identical output, checked as digest equality. For programs whose output is
+  floating-point text, the comparison is instead numeric with the FIXED tolerance
+  relative error |a-b| / max(|a|,|b|, 1) <= 1e-6, applied per numeric field -- a constant
+  of this spec, not a per-instance decision. Numeric fields are identified by splitting
+  both outputs on whitespace and newlines and treating each token that parses as a double
+  as a numeric field; token counts and non-numeric tokens must match exactly. Runtime is the median of at least 5 reruns; a
+  candidate configuration succeeds if its output matches and its runtime beats every
+  reference compilation offered, -O3 among them.
+
+interface: |
+  CLI: given a program id and a flag configuration, build and run it, returning
+  {runtime_ms, correct: bool}. Each instance ships both builds ready to rebuild and check
+  (default and optimized), its reference inputs, and a measurement command with a
+  repetitions knob.
+
+  WHAT THE BUILDER DELIVERS -- one instance is one directory of files:
+  - instance.json: repo_url, commit_sha, program_name (the identity, exactly as the search
+    handed them), and builder_notes (what the builder verified, how, with the numbers).
+  - Dockerfile: the compiler and the libraries the build needs. setup.sh: fetches the commit into
+    /work/repo.
+  - Two versions of the program, each built into its own directory by build.sh <dir> <flags>:
+    `default` built with -O0 and `optimized` built with -O3. build.sh honours the flags it is
+    given whatever the project's own makefile says.
+  - run.sh <dir> <input>: runs the built program in <dir> on one input file and prints the
+    program's output and nothing else (no timings, no banners; those go to stderr).
+  - gen_inputs.sh <dir>: writes the reference inputs into <dir>, several, of rising cost,
+    generated from the program's own domain.
+  - break.sh <dir>: corrupts the default build's computation in <dir> so that run.sh prints
+    something different.
+  - What the check reads: run.sh's output, compared byte for byte between repeated runs (it must
+    be identical: whatever varies is the builder's to mask) and between the two versions (it must
+    be identical); run.sh's runtime on the costliest input on each version; run.sh's output after
+    break.sh (it must differ). The two flag values -O0 and -O3 are the two answers the harness
+    tries through build.sh on the default version; they must build different programs.
+
+scale: |
+  First pass: ~15-20 programs. Construction compute: on the order of 10 CPU-hours.
+  Human budget: 0 -- construction and evaluation are fully automated (the builder is an
+  automated agent).
+
+criteria: |
+  - the program builds with the target compiler using no optimization flags (the default
+    build), and that build exits zero. The recorded build recipe honours an exported CFLAGS:
+    one recipe builds the default configuration when CFLAGS=-O0 is exported and the
+    optimizing configuration when CFLAGS=-O3 is, and whoever re-runs the recipe (the
+    harness, at every probe and every check) exports the flags rather than trusting the
+    recipe's own defaults -- a project whose build ignores CFLAGS (its makefile hardcodes
+    -O2, say) is not a source until its recipe is written to honour them
+  - a working setup is established FIRST: some reference input, however small or fast, for
+    which the default build produces a reproducible output. No timing requirement applies at
+    this point -- an instance is not rejected for being quick before it has been given
+    larger inputs to work on
+  - ONLY THEN, the instance generates SEVERAL further reference inputs of increasing COST
+    using a script it carries, and ships all of them -- the small one it started from and
+    the larger ones. Cost is measured, not assumed: each shipped input records the default
+    build's median runtime on it, and inputs are ordered by that runtime (byte size does
+    not predict cost -- a 16-byte config file can be the longest-running input). Inputs
+    are generated by scaling parameters of the program's own domain (a bigger corpus to
+    compress, a longer wordlist to search, a larger image to resize), never downloaded.
+    The costliest input must bring the default build's median runtime to at least 1 second
+    (median over at least 5 runs), so a difference between compilations is observable
+    rather than lost in process startup, and to at most 10 seconds: every later stage
+    re-runs this input some thirty times per instance (five repetitions per side per
+    control), so an input that takes minutes turns one instance into hours of machine
+    time, and an input large enough to leave the page cache makes every repetition
+    I/O-bound and hides the very difference the instance exists to show (a 3 GB input
+    separated at 1.15x where 100 x 10 MB from cache separated at 2.46x, same program).
+    Generate the largest input INSIDE that band, not the largest input possible. A program
+    that cannot be pushed into the band by any input the builder can generate is recorded
+    with its achieved runtime and the reason -- an explicit recorded exception, never a
+    silent pass. The exception field has exactly one spelling for "no exception applies"
+    (the literal `none`) so that a reader can tell the two cases apart mechanically, and a
+    non-`none` reason must state a fact the harness can contradict from the record: the
+    achieved median runtime and why no generated input raises it (a program whose runtime
+    is process startup regardless of input says so; a reason that merely restates that the
+    floor was met is not an exception). A runtime that DOES lie in the band with a reason
+    other than `none`, or one that does not with `none`, is a contradiction, not a pass
+  - the costliest input must also make the program's OWN computation the thing being timed.
+    Runtime alone is not enough: a run can spend a full second reading files or waiting and
+    still leave the optimizer nothing to work on. The observable test is the one the
+    instance already records -- the default build's median on the costliest input must be at
+    least 1.05 times the -O3 build's median there (a 5% separation, the same factor the
+    reference compilations are already compared by). Below that the workload has not been
+    shown to be sensitive to compiler flags, and an instance built on it cannot rank flag
+    configurations. Such a
+    measurement is a verdict on the WORKLOAD, not on the program: the same program under a
+    different workload often separates cleanly (walking a repository's history is I/O-bound
+    and came out at 1.00x, while hashing a 500 MB file with the same binary came out at
+    3.2x). So before a program is set aside for being flag-insensitive, at least one further
+    workload of a different KIND -- more computation per byte, less I/O, no startup
+    dominance -- must have been tried and recorded
+  - the program also builds under at least one optimizing configuration including -O3, and
+    each such build produces output IDENTICAL to the default build's for the same input --
+    exactly for non-floating output, or within the stated numeric tolerance for
+    floating-point
+  - each reference compilation records its own runtime ON THE LARGEST INPUT, so a solver has
+    a time to beat; ALL repetition timings (at least 5 runs) are recorded as a list together
+    with their mean, median and coefficient of variation -- variance is reported as data,
+    never used to exclude an instance (the reason is: measurements on a shared machine compete for resources and a variance threshold there measures the machine's load, not the candidate). Only a measurement rendered meaningless by interference --
+    order-of-magnitude outliers across repetitions -- is re-measured rather than shipped
+  - a compilation that crashes, or whose output differs from the default build's, is
+    recorded as such rather than silently dropped -- detecting that difference is what the
+    instance's oracle is for
+  - the program must be deterministic on the chosen reference inputs (or made deterministic
+    by supplying fixed seeds/inputs): identical output digest across at least 3 consecutive
+    runs in the same environment
+
+  - the builder verifies each of these itself before delivering, by running the scripts on its
+    own machine: the program does its own computation on the input (not startup, not I/O); the
+    output is identical across three runs; the two versions print the same output; break.sh
+    changes it; the default build's median runtime on the costliest input lies between 1 and 10
+    seconds and is at least 1.05 times the -O3 build's median
+  - done means: the harness ran every script on a blank machine without a crash, and the builder
+    has verified the points above itself and written what it verified, with the numbers and the
+    reason for anything it accepted against the harness's observations, into instance.json under
+    builder_notes. The harness reports what it observed; the builder judges.
+
+constraints: |
+  - C programs only
+
+admissibility:
+  - name: language
+    observe: "GET https://api.github.com/repos/{org}/{project} -> language"
+    require: "one of [c]"
+  - name: commit_count
+    observe: "git rev-list --count HEAD in a full clone"
+    require: ">= 100"
+  - name: build_file
+    observe: "GET https://api.github.com/repos/{org}/{project}/contents/ -> the root listing; report the FIRST file name in it that, lowercased, is one of the required set (absence of any such file fails the clause)"
+    require: "one of [makefile, cmakelists.txt, configure.ac, configure, makefile.am]"
+  - name: stars
+    observe: "GET https://api.github.com/repos/{org}/{project} -> stargazers_count"
+    require: ">= 100"
+  - name: last_commit
+    observe: "GET https://api.github.com/repos/{org}/{project} -> pushed_at (YYYY-MM-DD)"
+    require: "within 24 months"
+  - name: is_fork
+    observe: "GET https://api.github.com/repos/{org}/{project} -> fork"
+    require: "is false"
+
+artifact_variants:
+  - name: default
+    description: "the program built with NO optimization flags -- the functional reference. Its output is what every other compilation must reproduce, and its runtime is the unoptimized starting point"
+    check_cmd: "sh run.sh . <reference input>"
+    expect: pass
+    results: none
+    results_none_reason: "digest comparison of program output is the evidence; no test framework runs"
+  - name: optimized
+    description: "the same program built with the recorded optimizing flags (including -O3). Its output must match the default build's; its runtime is the bar a solver has to beat"
+    check_cmd: "sh run.sh . <reference input>"
+    expect: pass
+    results: none
+    results_none_reason: "digest comparison of program output is the evidence; no test framework runs"
+
+parameters:
+  - name: cflags
+    kind: string
+    default: "-O0"
+solver_input:
+  kind: parameter
+  name: cflags
+  describes: "the compiler flag configuration the solver proposes, applied to the same source"
+  probe_values: ["-O0", "-O3"]
+
+negative_control:
+  break_cmd: corruption_cmd
+  restore_cmd: rebuild_cmd
+  check: default
+  describes: "replace the built binary with one that does nothing, or corrupt a constant the output depends on"

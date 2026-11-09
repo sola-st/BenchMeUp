@@ -1,0 +1,12 @@
+{
+ "identity": [
+  "clone_url",
+  "head_sha"
+ ],
+ "normalize": {
+  "clone_url": "git_url",
+  "head_sha": "full_sha"
+ },
+ "count": 197,
+ "agent_dir": "agents/sonarqube_search"
+}

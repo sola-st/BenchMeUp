@@ -1,0 +1,142 @@
+task: |
+  Given a real Java project at a specific buggy commit, with at least one failing test that
+  passes after a known fix commit, an automated program-repair technique attempts to fix the
+  bug and is validated by running the tests.
+
+instance: |
+  input: a Defects4J-format bug record (project id, buggy revision, fixed revision, triggering
+  test id(s))
+  expected output: a source-code patch that makes the triggering test(s) pass without
+  breaking the project's other passing tests
+
+data: |
+  Any popular, actively-maintained Java project qualifies as a source: what makes one suitable
+  is a genuine test suite, an issue tracker with real fixed issues, and ongoing commit
+  activity, so that bug-fix commits which add a revealing test actually exist to be found.
+  Real, public, with a git history and a linked issue tracker, buildable via Ant
+  or Maven. Instances should spread across different organisations and project families rather
+  than several coming from whichever one was looked at first.
+  ONE instance = ONE bug-fixing commit in ONE repository, identified by {repository clone
+  URL, fix commit hash}; these two fields are the identity of a candidate and of an instance,
+  under exactly these roles (the clone URL, not a project name or an owner/name pair).
+  Candidate = a commit that fixes a real bug (indicated by its commit message,
+  linked issue, or merged pull request -- not a refactor or feature addition) and adds or
+  modifies a test in that same commit that reveals the bug: that test fails when run against
+  the commit's parent (pre-fix) code and passes when run against the commit itself (post-fix
+  code). The fix changes NON-TEST source: the fix patch is the non-test part of the commit's
+  diff and the test patch is the rest. A commit whose whole diff lies in test files has no fix
+  in it and is not a candidate.
+
+correctness: |
+  Apply the candidate patch to the buggy revision, run the triggering test(s) (must now pass),
+  and run the project's other previously-passing tests (must remain passing) -- fail-to-pass
+  plus no-regression.
+
+interface: |
+  Each instance packaged in Defects4J's own bug-database shape (active-bugs.csv-compatible:
+  project id, buggy/fixed revision hashes, report id/url).
+
+  WHAT THE BUILDER DELIVERS -- one instance is one directory of files:
+  - instance.json: repo_clone_url, fix_commit_hash (the identity), buggy_commit (the parent of
+    the fix commit), triggering_tests (the ids of the tests the commit adds or modifies, as the
+    build tool reports them), and builder_notes.
+  - Dockerfile: the JDK and the build tool the project uses. setup.sh: fetches both commits into
+    /work/repo.
+  - Two versions, each in its own directory by checkout.sh <dir> <commit>, then apply_patch.sh
+    <dir> <patch> where needed, then build.sh <dir>: `buggy` is the parent commit with the fix
+    commit's test changes applied (test.patch); `fixed` is the fix commit itself.
+  - run_tests.sh <dir>: runs the triggering tests in <dir> and prints the build tool's JUnit XML
+    report on stdout, unmodified, exiting 0 whether they pass or fail. The builder may add any
+    further check script it finds useful, for example check_all.sh <dir> running the whole suite
+    and exiting 0 when nothing regressed; every check script it declares is run and read.
+  - fix.patch (the non-test part of the commit's diff), test.patch (the test part) and
+    empty.patch: the fix and the empty patch are the two answers the harness tries on `buggy`
+    through apply_patch.sh; the fix must make the triggering tests pass, the empty patch must
+    not. revert_fix.sh <dir> reverts the fix in the `fixed` tree so the tests must fail again.
+  - What the checks read: the triggering tests' outcome in the JUnit report, and the exit
+    status of any further check script.
+
+scale: |
+  First pass: ~15-20 bugs.
+
+criteria: |
+  - real bug-fixing commit (not synthetic/injected), confirmed by commit message, linked
+    issue, or merged pull request
+  - the commit's own added/modified test fails on its parent commit and passes on the commit
+    itself, confirmed by an actual test run
+  - the fix changes non-test source: the fix patch is the non-test part of the commit's diff,
+    the test patch is the rest, and a commit whose whole diff is in test files is not a
+    candidate (a test-only commit was once delivered, wrongly, and is worthless). A file is a
+    TEST FILE when its path lies under a test source root -- src/test/, or whichever directory
+    this project's build tool declares as its test sources -- and NOT because the word "test"
+    appears somewhere in its name: LatestVersion.java is production source.
+  - both revisions build
+
+  - the rest of the suite must not REGRESS, which is not the same as being green. Real projects
+    carry tests that already fail, or fail intermittently, for reasons that have nothing to do
+    with this bug, and such a project is a perfectly good source. So: the instance records, as
+    known_failing_tests, the tests that fail on the BUGGY version for a reason other than this
+    bug, and the whole-suite check passes on a version when no test outside that recorded set
+    fails there. A candidate is never dropped for a pre-existing failure, only for a NEW one.
+
+  - the builder verifies itself, by running them on its own machine, that the triggering tests
+    fail on the buggy version and pass on the fixed one, that the fix changes non-test source,
+    and that no test outside known_failing_tests fails on the fixed version; it records the test
+    ids, the known_failing_tests it observed, and its judgment in builder_notes
+  - done means: the harness ran every script on a blank machine without a crash, and the builder
+    has verified the points above itself and written what it verified, with the numbers and the
+    reason for anything it accepted against the harness's observations, into instance.json under
+    builder_notes. The harness reports what it observed; the builder judges.
+
+constraints: |
+  - Java projects only; any standard JVM build (Maven, Gradle, Ant)
+  - a project already in Defects4J is disqualified, since these instances must be new.
+    Excluded: Chart, Cli, Closure, Codec, Collections, Compress, Csv, Gson, JacksonCore,
+    JacksonDatabind, JacksonXml, Jsoup, JxPath, Lang, Math, Mockito, Time
+
+admissibility:
+  - name: language
+    observe: "GET https://api.github.com/repos/{org}/{project} -> language"
+    require: "one of [java]"
+  - name: commit_count
+    observe: "git rev-list --count HEAD in a full clone"
+    require: ">= 1000"
+  - name: has_issues
+    observe: "GET https://api.github.com/repos/{org}/{project} -> has_issues"
+    require: "is true"
+  - name: closed_bug_issues
+    observe: "GET https://api.github.com/search/issues?q=repo:{org}/{project}+is:issue+is:closed+label:bug -> total_count"
+    require: ">= 20"
+  - name: stars
+    observe: "GET https://api.github.com/repos/{org}/{project} -> stargazers_count"
+    require: ">= 100"
+  - name: last_commit
+    observe: "GET https://api.github.com/repos/{org}/{project} -> pushed_at (YYYY-MM-DD)"
+    require: "within 12 months"
+  - name: is_fork
+    observe: "GET https://api.github.com/repos/{org}/{project} -> fork"
+    require: "is false"
+
+artifact_variants:
+  - name: buggy
+    description: "the project checked out and built at the buggy revision (the fix commit's parent), with the fix commit's own added/modified triggering test(s) applied to it. The check runs the triggering test(s) and passes only if they FAIL here -- the bug is observable"
+    check_cmd: "sh run_tests.sh ."
+    expect: pass
+    results: junit-xml
+    expect_failures: 1
+  - name: fixed
+    description: "the project checked out and built at the fixed revision (the fix commit itself). The check runs the same triggering test(s) and passes only if they PASS here. The whole suite is checked separately and must show no failure outside the recorded known_failing_tests -- fail-to-pass plus no-regression, where no-regression means no NEW failure, not a green suite"
+    check_cmd: "sh run_tests.sh ."
+    expect: pass
+    results: junit-xml
+    expect_failures: 0
+
+solver_input:
+  kind: workdir
+  path: "{clone_path}"
+  describes: "the solver edits the checked-out buggy source tree; the check re-runs the triggering test against its edit"
+
+negative_control:
+  break_cmd: corruption_cmd
+  check: fixed
+  describes: "revert the fix in the working tree (or delete the transplanted test) so the triggering test must stop passing"

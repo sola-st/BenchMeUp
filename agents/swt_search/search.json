@@ -1,0 +1,14 @@
+{
+ "spec": "specs/swt/spec.yaml",
+ "spec_sha256": "8bacb85a9906cb268533833102b8bc9709dd16d854d5f1c70549ac469eb27b56",
+ "canonical": "specs/swt/canonical.json",
+ "identity": [
+  "repo_url",
+  "merge_commit"
+ ],
+ "normalize": {
+  "repo_url": "git_url",
+  "merge_commit": "full_sha"
+ },
+ "target": 200
+}

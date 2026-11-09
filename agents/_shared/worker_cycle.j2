@@ -1,0 +1,27 @@
+{% if machine_note %}YOUR MACHINE: {{ machine_note }}
+
+{% endif %}{% if recipes_progress %}
+WHAT EARLIER STAGES ESTABLISHED FOR THIS CANDIDATE (for reference; do not redo it)
+{{ recipes_progress }}
+
+{% endif %}{% if worklist_text %}{{ worklist_text }}
+{% else %}No candidate in hand: the pool is used up.
+{% endif %}
+{% if worklist_progress %}PROGRESS
+{{ worklist_progress }}
+{% endif %}
+{%- if worklist_rejection_pattern %}
+WHY YOUR CANDIDATES KEEP FAILING
+{{ worklist_rejection_pattern }}
+{% endif %}
+{% if files_written_text %}{{ files_written_text }}
+{% endif %}
+Recent actions:
+{{ action_log }}
+
+Budget: {{ budget }}
+
+Reply with the single JSON object for your next action.
+{% if worklist_now %}
+NOW (repeated so it is the last thing you read): {{ worklist_now }}
+{% endif %}

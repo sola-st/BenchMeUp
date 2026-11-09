@@ -1,0 +1,260 @@
+{
+ "verbs": {
+  "checkout": {
+   "args": [
+    "dir",
+    "commit"
+   ]
+  },
+  "compile": {
+   "args": [
+    "dir"
+   ]
+  },
+  "apply_patch": {
+   "args": [
+    "dir",
+    "patch"
+   ]
+  },
+  "check": {
+   "args": [
+    "dir"
+   ]
+  },
+  "revert_fix": {
+   "args": [
+    "dir"
+   ]
+  }
+ },
+ "variants": {
+  "violating": {
+   "setup": [
+    {
+     "verb": "checkout",
+     "args": {
+      "commit": "{violating_sha}"
+     }
+    },
+    {
+     "verb": "apply_patch",
+     "args": {
+      "patch": "/bench/empty.patch"
+     }
+    },
+    {
+     "verb": "compile",
+     "args": {}
+    }
+   ]
+  },
+  "fixed": {
+   "setup": [
+    {
+     "verb": "checkout",
+     "args": {
+      "commit": "{fixed_sha}"
+     }
+    },
+    {
+     "verb": "compile",
+     "args": {}
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "check",
+  "compare": "exact",
+  "reader": "exit-code",
+  "select": null
+ },
+ "checks": [
+  {
+   "verb": "check",
+   "compare": "exact",
+   "reader": "exit-code",
+   "select": null
+  }
+ ],
+ "oracle": {
+  "kind": "fail-to-pass",
+  "fails_on": "violating",
+  "passes_on": "fixed"
+ },
+ "negative_control": {
+  "verb": "revert_fix",
+  "variant": "fixed",
+  "expect": "observable_changes",
+  "then": null
+ },
+ "solver_input": {
+  "verb": "apply_patch",
+  "arg": "patch",
+  "variant": "violating",
+  "probe_values": [
+   "/bench/gold_fix.patch",
+   "/bench/empty.patch"
+  ]
+ },
+ "measure": null,
+ "predicates": [
+  {
+   "run": "git -C /work/repo rev-parse --verify {head_sha}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "git -C /work/repo rev-parse --verify {violating_sha}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "git -C /work/repo rev-parse --verify {fixed_sha}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "git -C /work/repo cat-file -e {violating_sha}:{warning_file}",
+   "require": "exit zero"
+  },
+  {
+   "run": "git -C /work/repo cat-file -e {fixed_sha}:{warning_file}",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "checkout": "copy the repository from /work/repo into <dir> and hard-check-out <commit> there so <dir> holds that exact revision's sources; exit 0",
+  "compile": "compile the project in <dir> fully offline with the recorded Maven/Gradle command using the pre-populated local dependency cache; exit 0 when it built (its log is not the observable)",
+  "apply_patch": "apply the unified diff <patch> (a path under /bench, possibly empty) to <dir> with git apply; exit 0",
+  "check": "compile <dir>, run sonar-scanner against the SonarQube server inside the instance, wait for the analysis task to finish, fetch the issue list and print exactly three lines - 'warning_gone: yes|no', 'declaration_present: yes|no', 'new_warnings: none|<rule keys>' - exiting 0 only when the recorded rule key is absent at the recorded file and line, the enclosing declaration still exists, and no rule that was not already there appears in the files the working tree changed; nonzero otherwise",
+  "revert_fix": "apply the reverse of /bench/gold_fix.patch to <dir> so the developer's change is undone and the recorded warning comes back; exit 0"
+ },
+ "_stages": [
+  {
+   "name": "install SonarQube and the scanner, then find the warning pair",
+   "files": [
+    "Dockerfile",
+    "setup.sh",
+    "instance.json"
+   ],
+   "goal": "The search hands you only clone_url and head_sha: a commit whose message claims a Sonar warning was fixed. Everything else you must establish here. The Dockerfile installs the JDK, Maven or Gradle, and exactly SonarQube Community Build 25.5.0.107428 from https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-25.5.0.107428.zip plus sonar-scanner-cli 7.0.2.4839 from https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-7.0.2.4839-linux-x64.zip - do not substitute another version number and do not drop the -linux-x64 suffix; SonarQube must not run as root and needs its embedded database initialised at image build time. setup.sh clones clone_url into /work/repo with enough history to reach head_sha and its parent, then pre-fetches every build dependency of BOTH revisions into the image's local Maven/Gradle cache so that nothing touches the network later; the scanner must be pointed at the local server, never SonarCloud. Then do the real work: take fixed_sha = head_sha and violating_sha = its parent (or an earlier ancestor if the pair only separates a few commits back), boot the server, compile and analyze both revisions, diff the two issue lists, and pick one rule key that is present at violating_sha in a .java file the commit modifies and absent at fixed_sha; record rule_key, rule_severity, warning_file, warning_line and the enclosing method or class signature as enclosing_declaration, plus project_key, build_tool, the exact offline build_command and scan_command, and the two tool versions. If no warning actually disappears, this candidate is not an instance. instance.json carries identity and locations only - never the fix's text.",
+   "done_when": "the image builds offline-capable, setup.sh exits 0, instance.json carries all the established fields, and the five identity predicates hold in the fresh clone",
+   "verbs": [],
+   "rows": [
+    "replays",
+    "identity"
+   ]
+  },
+  {
+   "name": "check out each revision, patch it and compile it offline",
+   "files": [
+    "checkout.sh",
+    "compile.sh",
+    "apply_patch.sh",
+    "empty.patch"
+   ],
+   "goal": "These three scripts are what the harness runs to build both sides, so they must work before any verdict exists. checkout.sh must materialise an arbitrary revision into a directory whose name it is given, never a fixed path, and must leave a working git repo there so patches can be applied and reverted. apply_patch.sh takes any unified diff under /bench and applies it to the checked-out project with git apply; it must succeed on a zero-byte empty.patch (which you write here) and later on the developer's diff, and must fail loudly on a malformed one rather than silently leaving the tree unchanged - it is the single door a solver's submission comes through. compile.sh runs the recorded offline build (Maven -o, Gradle --offline) against the warmed cache; a build that silently reaches the network passes in your scratch container and fails in the checker's fresh one. No script's log is read: only their exit status matters.",
+   "done_when": "both variants check out, apply their patch and compile in a fresh container with no network",
+   "verbs": [
+    "checkout",
+    "compile",
+    "apply_patch"
+   ],
+   "rows": [
+    "variants_build"
+   ]
+  },
+  {
+   "name": "write the SonarQube verdict script and the revert",
+   "files": [
+    "check.sh",
+    "revert_fix.sh",
+    "gold_fix.patch"
+   ],
+   "goal": "check.sh is the whole oracle: start or reuse the local SonarQube, compile <dir>, scan it with the recorded scanner command and project key, poll the ce/task endpoint until the analysis is processed - do not read the issues before the task is SUCCESS or you will grade a stale report - then query the issues API and decide the three conditions, printing the three fixed lines and nothing else. It must exit nonzero on the violating revision and zero on the fixed one; flaky waiting, a stale project key shared between revisions, or counting issues from files the change never touched are the usual causes of a wobbling verdict. gold_fix.patch is the diff violating_sha..fixed_sha restricted to source files, written under /bench; it must apply cleanly through apply_patch.sh onto the violating revision and turn the verdict to yes, while empty.patch leaves it at no. revert_fix.sh applies gold_fix.patch in reverse to the fixed revision so the warning reappears.",
+   "done_when": "check.sh is stable across repeated runs, says no on violating and yes on fixed, the verdict flips back to no after revert_fix.sh, and the violating variant passes with gold_fix.patch but not with empty.patch",
+   "verbs": [
+    "check",
+    "revert_fix"
+   ],
+   "rows": [
+    "stable",
+    "input_sensitive",
+    "oracle",
+    "can_fail",
+    "solver_input"
+   ]
+  }
+ ],
+ "_draw_notes": [
+  "stage 'check out each revision, patch it and compile it offline': its `goal` describes what the harness or the system does ('These three scripts are what the harness runs to build both sides, so they must work before any verdict exists.')"
+ ],
+ "_instance_fields": [
+  "clone_url",
+  "head_sha",
+  "violating_sha",
+  "fixed_sha",
+  "rule_key",
+  "rule_severity",
+  "warning_file",
+  "warning_line",
+  "enclosing_declaration",
+  "project_key",
+  "build_tool",
+  "build_command",
+  "scan_command",
+  "sonarqube_version",
+  "scanner_version"
+ ],
+ "_numbers_quoted": {},
+ "_identity_fields": [
+  "clone_url",
+  "head_sha"
+ ],
+ "_stage_sections": [
+  {
+   "where_you_are": "You are building one instance of a SonarQube warning-fixing benchmark: a small directory of scripts that rebuilds the whole instance from nothing on a machine with only Docker. Each instance is one warning that a developer removed in a real commit; a solver later edits the project and SonarQube's own report decides whether the fix worked. This is the first stage, so nothing exists yet: no image, no checkout, no analysis. All you arrive with is clone_url and a head_sha, a commit whose message claims a Sonar warning was fixed. Every other fact about this instance is yours to establish here, by actually running the analyzer.",
+   "goal": "Write a Dockerfile that installs the JDK, the project's build tool, SonarQube Community Build 25.5.0.107428 and sonar-scanner-cli 7.0.2.4839 from the exact URLs given, with SonarQube running as a non-root user and its embedded database initialised at image build time. Write setup.sh so it clones the repository into /work/repo with enough history for head_sha and its ancestors, and pre-fetches the build dependencies of both revisions so nothing reaches the network afterwards. Then do the real work: boot the server, compile and analyze both revisions offline, diff the two issue lists, and find a rule key present at the violating revision in a .java file the commit modifies and absent at the fixed revision. Only when such a warning exists can instance.json be written, carrying the identity and locations you established and never the fix's text.",
+   "traps": [
+    "Do not assume the commit message tells the truth: the rule it names may still be reported at head_sha, or the warning may sit in a file the commit only adds rather than modifies, and then this candidate is simply not an instance and should be dropped through the tool you are given, not patched around.",
+    "Do not treat head_sha's parent as automatically the violating revision without checking it: if the parent's issue list shows no rule disappearing, walk a few commits further back along the first parent and analyze again, since the pair need not be parent and child.",
+    "Do not use any SonarQube or scanner version other than the two named, and keep the -linux-x64 suffix on the scanner archive; older numbers such as 9.9.5.90326 are published but answer 403, and pre-6.x archives end in -linux.zip, so a guessed number breaks the image build.",
+    "Do not let the scanner default to SonarCloud or to a host resolved at analysis time: pass sonar.host.url pointing at the server inside the container, generate a token during setup, and make the build and scan commands offline (mvn -o with a warmed ~/.m2, or Gradle --offline with a warmed cache for both revisions, not just one).",
+    "Do not read the issue list off the scanner's console output: the scanner only submits the analysis, so wait for the background compute task to finish and then query the server's issues API for the ruleKey, severity, component and line, otherwise you will pick a line number that SonarQube never reported.",
+    "Do not write a warning_line copied from the commit diff or a hand-guessed enclosing_declaration: take the line from SonarQube's report at the violating revision and read the enclosing method or class signature out of the file at that exact revision, since a later stage's verdict is anchored to that file and line."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of this benchmark: a small directory of scripts that rebuilds the whole thing from nothing on a machine with only Docker, so that a SonarQube warning can be removed from a Java project and the same SonarQube asked whether it is gone. The instance arrives as a clone URL and a head commit; you have since established the two revisions, the rule and its location, the build tool and commands, and the SonarQube and scanner versions. So far the container builds and setup.sh runs inside it, and the commit and the files it names exist. Nothing else is settled yet. Now you write the three scripts that turn a revision into a compiled tree.",
+   "goal": "In this stage you make both sides of the instance buildable. checkout.sh must materialise any commit you hand it into whatever directory name it is given, leaving a real git repository there; apply_patch.sh must take any unified diff under /bench and apply it with git apply, succeeding on the zero-byte empty.patch you write here and failing loudly on a diff that does not apply; compile.sh must build a checked-out tree fully offline with the recorded Maven or Gradle command against the warmed cache. Every later verdict in this instance rests on these three doing their job for both the violating and the fixed revision.",
+   "traps": [
+    "Do not hard-code a clone path inside checkout.sh: it takes the target directory as its first argument and must work for two different directories side by side, so copy /work/repo into <dir> (or clone from it) and then check out the commit hard there rather than writing to a fixed location.",
+    "Do not leave the checked-out tree without a .git directory, and do not leave it dirty: git apply needs a working repository and a clean tree, so use a hard checkout or reset plus a clean of untracked files after copying.",
+    "Do not let compile.sh reach the network: pass -o to Maven or --offline to Gradle and point at the local cache setup.sh populated, because a build that quietly downloads succeeds on your machine and dies in a fresh container that has no network during checking.",
+    "Do not compile only the revision you happen to have handy: warm the cache and run compile.sh on both the violating and the fixed revision, since a dependency added or removed between them will otherwise surface as a missing artifact later.",
+    "Do not make apply_patch.sh swallow git apply's failure with something like `git apply ... || true`, and do not special-case an empty file by skipping the command in a way that also skips real errors: a zero-byte patch is a legitimate no-op that must exit 0, while a patch that does not apply must exit non-zero.",
+    "Do not assume the project builds with its default goals: if the build needs to skip tests, javadoc or enforcer plugins to finish offline, put those flags into compile.sh and keep them consistent with the build command you established, and adjust setup.sh if the cache it warms does not cover what compile.sh actually runs."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of a SonarQube warning-fixing benchmark as a directory of scripts that rebuilds itself from nothing on a machine with only Docker. The candidate arrived with just two fields, clone_url and head_sha; everything else about the instance you established yourself. Earlier stages got the container building and setup.sh running, confirmed the commit and the files it touches exist, and confirmed both versions build. You now hold the facts an instance needs: violating_sha and fixed_sha, the rule key, severity, warning file and line, the enclosing declaration, the project key, build tool, build and scan commands, and the SonarQube and scanner versions. What is missing is the oracle itself.",
+   "goal": "Write check.sh so that it is the entire verdict: start or reuse the SonarQube inside the instance, compile the directory it is given, scan it with the recorded scanner command and project key, wait until the analysis task is actually processed, then read the issues API and print exactly the three lines - warning_gone, declaration_present, new_warnings - exiting zero only when all three conditions hold. Produce gold_fix.patch under /bench as the source-file part of the diff from the violating to the fixed revision, applying cleanly onto the violating revision through apply_patch.sh, and revert_fix.sh to undo it on the fixed revision. The whole benchmark's measurement is this exit code, so it must say no on the violating revision and yes on the fixed one, every run.",
+   "traps": [
+    "The commonest cause of a wobbling verdict is reading the issues API before SonarQube has finished processing: the scanner returns as soon as the report is uploaded, so take the ce task id from the scanner output or report-task.txt and poll /api/ce/task until it is SUCCESS before calling /api/issues, and fail loudly rather than grading a stale or empty report.",
+    "Do not reuse one project key across both revisions in the same server without clearing state, or the fixed revision inherits the violating one's issues; either use a key that distinguishes what is being analyzed or delete and recreate the project before each scan so the issue list belongs to the run you just did.",
+    "For the third condition, compare only within the files the working tree changed relative to the violating revision, and compare rule keys against the set present at that same path before the edit; counting every issue in the project, or in files nobody touched, will make check.sh reject correct fixes.",
+    "Build gold_fix.patch from the violating_sha..fixed_sha diff restricted to source files - drop build metadata, generated files, test resources and binary hunks - because unrelated edits in the developer's commit can fail to apply or change the build; then actually apply it onto a fresh violating checkout through apply_patch.sh and see the verdict flip to yes, and confirm an empty patch leaves it at no.",
+    "Anything check.sh needs at run time must come from the image: the compile must work offline with dependencies already fetched, and the scanner must point at the local SonarQube host, never at SonarCloud; if a needed dependency or server option is missing, go back and change setup.sh, compile.sh or checkout.sh rather than letting check.sh reach the network.",
+    "Keep check.sh's stdout to exactly the three lines - route Maven or Gradle output, scanner logs and polling chatter to a log file or stderr - and make revert_fix.sh apply gold_fix.patch in reverse against the fixed revision so the warning genuinely reappears, rather than just touching or deleting the edited file."
+   ]
+  }
+ ],
+ "_drawn": {
+  "spec": "specs/sonarqube/spec.yaml",
+  "spec_sha256": "1679023d31b8618d0e985147ab9b1a4e4fd2f3ad3f5fcaa3d2acfbcd2c7bae4e",
+  "canonical": "specs/sonarqube/canonical.json",
+  "identity": [
+   "clone_url",
+   "head_sha"
+  ]
+ }
+}

@@ -1,0 +1,266 @@
+{
+ "verbs": {
+  "checkout": {
+   "args": [
+    "dir",
+    "commit"
+   ]
+  },
+  "apply_patch": {
+   "args": [
+    "dir",
+    "patch"
+   ]
+  },
+  "install": {
+   "args": [
+    "dir"
+   ]
+  },
+  "run_tests": {
+   "args": [
+    "dir"
+   ]
+  },
+  "revert_fix": {
+   "args": [
+    "dir"
+   ]
+  }
+ },
+ "variants": {
+  "prefix": {
+   "setup": [
+    {
+     "verb": "checkout",
+     "args": {
+      "commit": "{base_commit}"
+     }
+    },
+    {
+     "verb": "apply_patch",
+     "args": {
+      "patch": "/bench/test_patch.patch"
+     }
+    },
+    {
+     "verb": "install",
+     "args": {}
+    }
+   ]
+  },
+  "postfix": {
+   "setup": [
+    {
+     "verb": "checkout",
+     "args": {
+      "commit": "{merge_commit}"
+     }
+    },
+    {
+     "verb": "install",
+     "args": {}
+    }
+   ]
+  }
+ },
+ "observable": {
+  "verb": "run_tests",
+  "compare": "exact",
+  "reader": "junit-xml",
+  "select": "{test_name}"
+ },
+ "checks": [
+  {
+   "verb": "run_tests",
+   "compare": "exact",
+   "reader": "junit-xml",
+   "select": "{test_name}"
+  }
+ ],
+ "oracle": {
+  "kind": "fail-to-pass",
+  "fails_on": "prefix",
+  "passes_on": "postfix"
+ },
+ "negative_control": {
+  "verb": "revert_fix",
+  "variant": "postfix",
+  "expect": "observable_changes",
+  "then": null
+ },
+ "solver_input": {
+  "verb": "apply_patch",
+  "arg": "patch",
+  "variant": "prefix",
+  "probe_values": [
+   "/bench/test_patch.patch",
+   "/bench/empty.patch"
+  ]
+ },
+ "measure": null,
+ "predicates": [
+  {
+   "run": "git -C /work/repo rev-parse --verify {merge_commit}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "git -C /work/repo rev-parse --verify {base_commit}^{{commit}}",
+   "require": "exit zero"
+  },
+  {
+   "run": "test \"$(git -C /work/repo rev-parse {merge_commit}^1)\" = \"$(git -C /work/repo rev-parse {base_commit}^{{commit}})\"",
+   "require": "exit zero"
+  }
+ ],
+ "_does": {
+  "checkout": "create <dir> as a working tree of /work/repo checked out at <commit> (clean, no leftover changes); exit 0",
+  "apply_patch": "apply the unified diff at path <patch> (a file under /bench) to the tree in <dir> with git apply; exit 0 when it applied",
+  "install": "install the project in <dir> and the dependencies its test suite needs so its tests can be run from <dir>; exit 0",
+  "run_tests": "run the single test named by test_name in /bench/instance.json inside <dir> and print the test runner's JUnit XML report on stdout unmodified and nothing else; exit 0 whether the test passed or failed",
+  "revert_fix": "apply the reverse of /bench/fix.patch to the tree in <dir> so the pull request's non-test source changes are gone; exit 0"
+ },
+ "_stages": [
+  {
+   "name": "install Python and clone both commits, and establish the pull request's facts",
+   "files": [
+    "Dockerfile",
+    "setup.sh",
+    "instance.json"
+   ],
+   "goal": "The search hands you only repo_url and merge_commit; everything else you must establish. Find base_commit as the FIRST PARENT of merge_commit (git rev-parse {merge_commit}^1) -- a squashed or rebased pull request has exactly one parent and that is normal, never require a second. Read the pull request's diff (git diff base_commit merge_commit) and split it: the test files' changes are the PR's test, the rest is the fix; from the issue it closes take problem_statement; from the test files take test_name written exactly as the project's runner names it (e.g. tests/test_x.py::TestY::test_z). Dockerfile installs the Python version and system libraries the project needs (no source, no build); setup.sh clones repo_url into /work/repo and fetches both commits with full enough history that base_commit is present. A package present only in your scratch container is missing in the fresh one.",
+   "done_when": "the image builds, setup.sh exits 0, instance.json carries repo_url, merge_commit, base_commit, test_name, problem_statement and builder_notes, and the identity predicates hold in the fresh clone (both commits resolve and merge_commit's first parent is base_commit)",
+   "verbs": [],
+   "rows": [
+    "replays",
+    "identity"
+   ]
+  },
+  {
+   "name": "split the pull request into patches and write the checkout/apply/install scripts",
+   "files": [
+    "checkout.sh",
+    "apply_patch.sh",
+    "install.sh",
+    "test_patch.patch",
+    "fix.patch",
+    "empty.patch"
+   ],
+   "goal": "Write test_patch.patch (only the PR's added/modified test files), fix.patch (the PR's non-test source changes) and an empty empty.patch, all as unified diffs that git apply accepts against the base_commit tree. checkout.sh must place a clean tree of the given commit under the directory it is handed (directory names are random; never assume a path). apply_patch.sh applies any /bench diff; install.sh installs the project plus test dependencies, pinning what the era of the commit needs (old setuptools/pip pins are the usual trap). Note that postfix already contains the test, so the patch is applied only on prefix.",
+   "done_when": "in a fresh container both variants set up end to end: checkout, apply_patch on prefix, and install all exit 0",
+   "verbs": [
+    "checkout",
+    "apply_patch",
+    "install"
+   ],
+   "rows": [
+    "variants_build"
+   ]
+  },
+  {
+   "name": "run the pull request's test and revert the fix",
+   "files": [
+    "run_tests.sh",
+    "revert_fix.sh"
+   ],
+   "goal": "run_tests.sh runs exactly the test named by test_name in the given directory and prints the runner's JUnit XML on stdout, raw, with no logs, banners or timings, exiting 0 whether the test passes or fails (pytest --junitxml to a temp file, then cat it). The report must actually contain a case whose id matches test_name, otherwise nothing can be read. revert_fix.sh applies fix.patch in reverse in the postfix tree so the fixed source is gone and the same test must fail again -- reverting the test file instead of the fix closes no check.",
+   "done_when": "the named test is FOUND and FAILS on prefix, PASSES on postfix, the report is stable across repeated runs, and after revert_fix.sh on postfix the test fails",
+   "verbs": [
+    "run_tests",
+    "revert_fix"
+   ],
+   "rows": [
+    "stable",
+    "input_sensitive",
+    "oracle",
+    "can_fail"
+   ]
+  },
+  {
+   "name": "check the submitted test is what decides the verdict",
+   "files": [],
+   "goal": "The harness applies a submission on top of prefix through apply_patch: the PR's own test_patch.patch must make the test fail there, and empty.patch must leave nothing for the runner to select. Make sure apply_patch tolerates being handed either file and that run_tests reports a missing test as a failure, not as a crash or a nonzero exit.",
+   "done_when": "the gold test patch reproduces the fail-on-prefix/pass-on-postfix result and the empty patch does not, with the builder's verification of both runs recorded in builder_notes",
+   "verbs": [],
+   "rows": [
+    "solver_input"
+   ]
+  }
+ ],
+ "_draw_notes": [
+  "stage \"install Python and clone both commits, and establish the pull request's facts\": its `goal` describes what the harness or the system does ('Dockerfile installs the Python version and system libraries the project needs (no source, no build);')",
+  "stage 'check the submitted test is what decides the verdict': its `goal` describes what the harness or the system does (\"The harness applies a submission on top of prefix through apply_patch: the PR's own test_patch.patch must make the test fail there, and empty.patch must leave n\")"
+ ],
+ "_instance_fields": [
+  "repo_url",
+  "merge_commit",
+  "base_commit",
+  "test_name",
+  "problem_statement",
+  "builder_notes"
+ ],
+ "_numbers_quoted": {},
+ "_identity_fields": [
+  "repo_url",
+  "merge_commit"
+ ],
+ "_stage_sections": [
+  {
+   "where_you_are": "You are building one instance of a bug-reproduction benchmark: a real merged pull request that closes an issue and adds or modifies a test, packaged as a small directory of scripts that rebuilds the whole thing from nothing on a blank machine. Later the instance will exist in two versions, prefix and postfix, and the verdict will come from a JUnit report. Nothing exists yet. All you arrive with is repo_url and the merge_commit that merged the pull request; every other fact about that pull request you must dig out yourself. This stage lays the foundation: a container with the right Python, a clone reaching both commits, and the pull request's facts written into instance.json.",
+   "goal": "Write a Dockerfile that installs the Python version and system libraries this project needs (no source, no build), a setup.sh that clones repo_url into /work/repo and fetches enough history that both commits resolve there, and instance.json. To fill instance.json you must first establish what you were not given: base_commit is the first parent of merge_commit, `git rev-parse {merge_commit}^1`; the diff between the two commits splits into the test files' changes and the rest; problem_statement is the text of the issue the pull request closes; test_name is the PR's test spelled exactly as the project's runner names it, for example tests/test_x.py::TestY::test_z. These facts are the instance's identity, and everything prefix and postfix later mean depends on them being right.",
+   "traps": [
+    "Do not assume merge_commit is a two-parent merge: GitHub's squash and rebase buttons land a pull request as one ordinary commit with a single parent, which is normal here, so take `git rev-parse {merge_commit}^1` and never require `^2` or drop the candidate for lacking one.",
+    "Do not clone shallowly and then find base_commit unreachable: `git clone --depth 1` or fetching a single ref leaves the parent missing, so in setup.sh clone with full history or fetch both SHAs explicitly and unshallow, then confirm both resolve inside the container.",
+    "Do not guess test_name from the diff's file path alone: open the added or modified test, find the function and its enclosing class, and write the identifier in the exact form the project's runner accepts, including the class segment and any parametrization suffix.",
+    "Do not put the pull request's own title or description in problem_statement: it must be the body of the issue the PR closes, since that is what a solver reads instead of the fix, so follow the closing reference (Fixes #N, Closes #N, or the linked issue) and take the issue text.",
+    "Do not pick a Python version or system packages from habit or from what happens to sit on your own machine: read setup.py, pyproject.toml or the CI config at base_commit for the supported versions, and name in the Dockerfile every compiler, header and library the project's dependencies need, because a fresh container has none of your local installs.",
+    "Do not keep a candidate whose diff between base_commit and merge_commit touches only test files: without non-test source changes there is no fix separating prefix from postfix, and the candidate should be dropped through the tool you have for that."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of this benchmark: a directory of scripts that rebuilds the whole thing from nothing on a blank machine. The instance is one merged pull request that closes an issue and, in the same PR, adds or changes a test. You arrive with the repository URL and the merge commit, and you have found the base commit (the merge commit's first parent), the test's name as the test runner writes it, and the issue text. Earlier stages got the container to build and setup.sh to run, so that both commits and their files exist in /work/repo in the fresh container. Nothing else is established.",
+   "goal": "In this stage you split the pull request into three unified diffs against the base commit tree — test_patch.patch with only the PR's added or modified test files, fix.patch with only its non-test source changes, and an empty empty.patch — and you write the three scripts that turn a commit into a usable tree: checkout.sh, apply_patch.sh and install.sh. This is what makes the two versions exist: prefix is the base commit with test_patch.patch applied and installed, postfix is the merge commit installed. If either tree fails to install or its test suite cannot run, the instance has no verdict at all.",
+   "traps": [
+    "Do not assume a directory name or a path: checkout.sh and install.sh are handed a directory as an argument and it is random, so use \"$1\" everywhere and never hardcode /work/prefix or cd into a guessed path.",
+    "Do not produce the patches by hand-editing a diff of the whole PR; generate them from git with an explicit pathspec (test files for one, everything else for the other) against the base commit, and confirm on your own machine that git apply accepts each one in a clean checkout of the base commit — a diff taken against the merge commit's tree will not apply there.",
+    "Do not classify files by guesswork: decide which paths are the project's tests by looking at where the project actually keeps them (tests/, test_*.py, conftest.py, sometimes a package-internal tests directory), and check that fix.patch really touches non-test source, since a PR that only changes tests is not a candidate for this benchmark.",
+    "Do not let checkout.sh reuse a dirty tree: create the directory fresh (a clone or worktree from /work/repo, or a clean checkout followed by git clean -xfd) so no leftover build artifacts or applied patches from another version leak in.",
+    "Do not install with today's toolchain and hope: these commits can be years old, so pin pip, setuptools and wheel to what that era's setup.py or pyproject.toml can build with, install the project in editable or normal mode plus the test dependencies (requirements-dev, test extras, the runner itself), and if setup.sh needs to fetch more refs or full history for that to work, change setup.sh.",
+    "Do not apply test_patch.patch to the merge commit tree: postfix already contains the PR's test, and applying it there will either fail or duplicate the test — the patch belongs only on prefix."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of this benchmark: a real merged pull request that closes an issue and adds or modifies a test, packaged as a directory of scripts that rebuilds the whole thing from nothing on a blank machine. So far the container builds and setup runs, the commits and files exist, and both versions build: prefix is the base commit with the pull request's test changes applied and installed, postfix is the merge commit installed. You already have in hand the things the candidate did not arrive with: base_commit, test_name and problem_statement. What is still missing is the part that produces a readable result and the part that undoes the fix.",
+   "goal": "Write run_tests.sh so that, given a directory, it runs exactly the one test named by test_name in /bench/instance.json inside that tree and prints the runner's JUnit XML on stdout and nothing else, exiting 0 whether the test passed or failed. The report has to contain a case whose id matches test_name, since that single case is the entire result: it must show a failure on prefix and a pass on postfix, which is what makes the issue reproducible and the fix real. Write revert_fix.sh so that applying it to a postfix tree removes the pull request's non-test source changes, leaving the test in place, so the same test stops passing.",
+   "traps": [
+    "Do not let pytest's own chatter reach stdout: write the report with --junitxml to a temp path (-p no:cacheprovider, -q, and redirect pytest's stdout/stderr to /dev/null if needed), then cat that file, so the XML is the first and only thing on stdout.",
+    "Do not let a failing test kill the script: pytest exits non-zero on failure, so guard the invocation (`pytest ... || true`) and end with an explicit exit 0, or the prefix run will look like a crash instead of the expected failure.",
+    "Do not invent your own node id in run_tests.sh; read test_name out of /bench/instance.json and pass it through, and check by hand that the classname/name pair the runner writes into the XML matches the test_name you stored, since a report with no matching case is unreadable no matter how the test behaved.",
+    "Do not run the test from outside the tree or from a fixed absolute path: cd into the directory given as $1 so that prefix and postfix each exercise their own installed copy, and so the result actually changes with the input.",
+    "Do not have revert_fix.sh touch the test file: fix.patch must contain only the non-test changes, and reverting it (git apply -R, or patch -p1 -R, run inside $1) must leave the test exactly as applied, otherwise the test disappears instead of failing.",
+    "If revert_fix.sh cannot apply cleanly in the postfix tree, fix the patch generation upstream rather than adding fuzz or ignoring errors; a partly reverted tree can still pass the test and hides a broken instance."
+   ]
+  },
+  {
+   "where_you_are": "You are building one instance of this benchmark as a directory of scripts that rebuilds itself from nothing: a Dockerfile and setup.sh that fetch the repository, checkout.sh and install.sh that lay down and install a version, run_tests.sh that runs the pull request's test and prints the runner's JUnit XML, and revert_fix.sh that undoes the fix. So far the container builds and setup runs; the commits and files exist; both versions, prefix and postfix, build; the runs are repeatable and their output depends on the input; the pull request's test fails on prefix and passes on postfix; and reverting the fix on postfix is detected. Only the submission path is still untested.",
+   "goal": "In this stage make the submitted test the thing that decides the verdict. A submission is handed to apply_patch.sh on top of the prefix tree: it is either test_patch.patch, which must make the pull request's test appear and fail there, or empty.patch, which leaves the tree unchanged so that test is simply not present. Both must flow through apply_patch.sh, install.sh and run_tests.sh without a crash, and run_tests.sh must still print a JUnit report and exit 0 in both cases. If a submission that adds nothing cannot be told apart from one that adds the reproducing test, the benchmark measures nothing.",
+   "traps": [
+    "Do not let apply_patch.sh die on empty.patch: `git apply` and `patch` both error on a zero-byte or no-hunk file, so have the script treat an empty or no-op patch as success and return 0 instead of aborting the run.",
+    "Do not let run_tests.sh exit nonzero or print nothing when the named test does not exist: pytest exits 4 or 5 on a collection error or 'no tests ran', so run it with --junitxml to a temp file, cat that file to stdout, and exit 0 yourself; if pytest produced no XML at all, emit a minimal JUnit document that shows the named test as a failure or error.",
+    "Do not select tests by a pattern like -k that silently matches zero tests and reports an empty, passing suite; use the exact node id recorded as test_name so an absent test is a selection failure you can turn into a reported failure.",
+    "Do not assume the prefix tree is clean when a patch is applied twice or when a previous run left artifacts; make checkout.sh give a fresh tree per directory and keep apply_patch.sh idempotent enough that a re-apply of the same patch does not leave the tree half-patched.",
+    "Do not skip install.sh after applying a submission if the project is installed non-editable: a test file added under the source tree may be imported from site-packages instead, so either install editable in install.sh or re-install after the patch so the added test is the one that runs.",
+    "Do not print anything besides the JUnit XML on run_tests.sh's stdout: pip output, warnings or a debug echo mixed into the report makes it unparseable; send that to stderr or a log file."
+   ]
+  }
+ ],
+ "_drawn": {
+  "spec": "specs/swt/spec.yaml",
+  "spec_sha256": "8bacb85a9906cb268533833102b8bc9709dd16d854d5f1c70549ac469eb27b56",
+  "canonical": "specs/swt/canonical.json",
+  "identity": [
+   "repo_url",
+   "merge_commit"
+  ]
+ }
+}

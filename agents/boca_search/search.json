@@ -1,0 +1,16 @@
+{
+ "spec": "specs/boca/spec.yaml",
+ "spec_sha256": "98d217a4292d164fd12aadbc684f6219fc3bc07f77ee8e3deff6cb792ddb30a3",
+ "canonical": "specs/boca/canonical.json",
+ "identity": [
+  "repo_url",
+  "commit_sha",
+  "program_name"
+ ],
+ "normalize": {
+  "repo_url": "git_url",
+  "commit_sha": "full_sha",
+  "program_name": "none"
+ },
+ "target": 200
+}
